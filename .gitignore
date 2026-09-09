@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+
+# 虚拟环境
+.venv/
+venv/
+env/
+
+# 环境变量（含真实 API Key，禁止上传）
+.env
+deploy/.env
+
+# 数据库（含真实业务数据，禁止上传）
+*.db
+*.sqlite
+*.sqlite3
+data/app.db
+
+# 缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.swp
+*.swo
+
+# IDE
+.vscode/
+.idea/
+*.iml
+
+# 操作系统
+.DS_Store
+Thumbs.db
+
+# 日志
+*.log
+logs/
+
+# 临时文件
+tmp/
+temp/
+*.tmp

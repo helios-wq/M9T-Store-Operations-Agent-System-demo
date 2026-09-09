@@ -1,0 +1,20 @@
+# 核心依赖（离线演示 + 在线生产都可用）
+fastapi>=0.110
+uvicorn[standard]>=0.29
+pydantic>=2.6
+python-dotenv>=1.0
+openai>=1.30
+httpx>=0.27
+numpy>=1.26
+redis>=5.0
+pymysql>=1.1
+jieba>=0.42
+requests>=2.31
+pytest>=8.0
+pyjwt>=2.8
+
+# Agent 编排（LangGraph；若安装失败，agent/graph.py 会自动降级为手动执行器）
+langgraph>=0.2.0
+
+# Milvus 向量库（仅生产模式需要；离线模式可跳过）
+pymilvus>=2.4.0

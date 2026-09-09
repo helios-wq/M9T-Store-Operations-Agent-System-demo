@@ -1,0 +1,78 @@
+# 轻量版部署（2核2G 服务器适用）
+# 仅启动 mysql + redis + app + nginx，不部署 milvus/etcd/minio
+# 向量库自动降级为内存模式（启动时从 data/index.json 加载，RAG 可用）
+# 完整版（含 Milvus）见 docker-compose.yml，原文件未改动
+#
+# 用法：
+#   cd deploy
+#   cp ../.env.example .env        # 首次需要创建配置文件
+#   docker compose -f docker-compose.lite.yml up -d --build
+#   docker compose -f docker-compose.lite.yml ps
+#   curl http://127.0.0.1:8000/healthz
+#
+# 预期健康检查：vector_store=memory, session_store=redis, db_store=mysql
+
+version: "3.8"
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: store_agent
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --innodb_buffer_pool_size=256M
+      --max_connections=50
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    restart: always
+    env_file: .env
+    environment:
+      # 覆盖 .env 里的 localhost，指向 Docker 网络内的服务名
+      MYSQL_HOST: mysql
+      REDIS_HOST: redis
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+  nginx:
+    image: nginx:1.25-alpine
+    restart: always
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./html:/usr/share/nginx/html:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - app
+
+volumes:
+  mysql_data:
+  redis_data:

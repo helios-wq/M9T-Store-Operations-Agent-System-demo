@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>门店运营智能助手</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; height:100vh; display:flex; flex-direction:column; }
+  .header { background:#4a90d9; color:#fff; padding:12px 16px; font-size:16px; font-weight:600; text-align:center; }
+  .tabs { display:flex; background:#fff; border-bottom:1px solid #eee; }
+  .tab { flex:1; padding:12px; text-align:center; font-size:14px; cursor:pointer; color:#666; border-bottom:2px solid transparent; }
+  .tab.active { color:#4a90d9; border-bottom-color:#4a90d9; font-weight:600; }
+  .page { flex:1; overflow-y:auto; display:none; }
+  .page.active { display:block; }
+
+  /* 对话页 */
+  .store-bar { background:#e8f0fe; padding:8px 16px; font-size:12px; color:#555; display:flex; justify-content:space-between; align-items:center; }
+  .store-bar select { border:none; background:transparent; font-size:12px; color:#4a90d9; outline:none; }
+  .chat-area { padding:16px; height:calc(100vh - 200px); overflow-y:auto; }
+  .msg { margin-bottom:14px; display:flex; }
+  .msg.user { justify-content:flex-end; }
+  .msg.bot { justify-content:flex-start; }
+  .bubble { max-width:75%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6; word-break:break-word; white-space:pre-wrap; }
+  .msg.user .bubble { background:#4a90d9; color:#fff; border-bottom-right-radius:4px; }
+  .msg.bot .bubble { background:#fff; color:#333; border-bottom-left-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,0.1); }
+  .msg.bot .bubble.tool { background:#f0f7ff; border-left:3px solid #4a90d9; }
+  .quick-actions { padding:8px 16px; background:#fff; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap; }
+  .quick-actions button { padding:6px 12px; background:#f0f0f0; border:1px solid #ddd; border-radius:16px; font-size:12px; cursor:pointer; color:#555; }
+  .quick-actions button:hover { background:#e8f0fe; border-color:#4a90d9; color:#4a90d9; }
+  .input-area { background:#fff; padding:10px 12px; display:flex; gap:8px; border-top:1px solid #eee; }
+  .input-area input { flex:1; padding:10px 14px; border:1px solid #ddd; border-radius:20px; font-size:14px; outline:none; }
+  .input-area input:focus { border-color:#4a90d9; }
+  .input-area button { padding:10px 20px; background:#4a90d9; color:#fff; border:none; border-radius:20px; font-size:14px; cursor:pointer; }
+  .input-area button:disabled { background:#ccc; cursor:not-allowed; }
+  .loading { display:inline-block; width:16px; height:16px; border:2px solid #ccc; border-top-color:#4a90d9; border-radius:50%; animation:spin 0.8s linear infinite; }
+  @keyframes spin { to { transform:rotate(360deg); } }
+
+  /* 报修页 */
+  .repair-container { padding:16px; }
+  .sub-tabs { display:flex; gap:8px; margin-bottom:16px; }
+  .sub-tab { padding:8px 16px; background:#fff; border:1px solid #ddd; border-radius:20px; font-size:13px; cursor:pointer; color:#666; }
+  .sub-tab.active { background:#4a90d9; color:#fff; border-color:#4a90d9; }
+  .form-card { background:#fff; border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .form-card h3 { font-size:15px; margin-bottom:12px; color:#333; }
+  .form-group { margin-bottom:12px; }
+  .form-group label { display:block; font-size:13px; color:#666; margin-bottom:4px; }
+  .form-group input, .form-group select, .form-group textarea { width:100%; padding:8px 12px; border:1px solid #ddd; border-radius:8px; font-size:14px; outline:none; }
+  .form-group input:focus, .form-group select:focus, .form-group textarea:focus { border-color:#4a90d9; }
+  .form-group textarea { resize:vertical; min-height:80px; }
+  .btn-primary { padding:10px 24px; background:#4a90d9; color:#fff; border:none; border-radius:8px; font-size:14px; cursor:pointer; width:100%; }
+  .btn-primary:disabled { background:#ccc; }
+  .filter-bar { display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap; }
+  .filter-bar select { padding:6px 12px; border:1px solid #ddd; border-radius:8px; font-size:13px; outline:none; }
+  .order-list { background:#fff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .order-item { padding:12px 16px; border-bottom:1px solid #f0f0f0; cursor:pointer; }
+  .order-item:last-child { border-bottom:none; }
+  .order-item:hover { background:#f8f9fa; }
+  .order-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+  .order-no { font-size:14px; font-weight:600; color:#333; }
+  .status-tag { padding:2px 8px; border-radius:10px; font-size:11px; font-weight:600; }
+  .status-已受理 { background:#f0f0f0; color:#666; }
+  .status-已派单 { background:#e6f4ff; color:#1677ff; }
+  .status-维修中 { background:#fff7e6; color:#fa8c16; }
+  .status-已解决 { background:#f6ffed; color:#52c41a; }
+  .status-已关闭 { background:#f5f5f5; color:#999; }
+  .order-info { font-size:12px; color:#888; line-height:1.6; }
+  .order-info span { margin-right:12px; }
+  .order-detail { background:#f8f9fa; padding:12px 16px; border-left:3px solid #4a90d9; }
+  .order-detail p { font-size:13px; color:#555; margin-bottom:6px; line-height:1.6; }
+  .order-detail .actions { margin-top:10px; display:flex; gap:8px; flex-wrap:wrap; }
+  .order-detail .actions button { padding:6px 14px; border:1px solid #ddd; border-radius:6px; font-size:12px; cursor:pointer; background:#fff; color:#555; }
+  .order-detail .actions button:hover { border-color:#4a90d9; color:#4a90d9; }
+  .order-detail .actions button.primary { background:#4a90d9; color:#fff; border-color:#4a90d9; }
+  .empty { text-align:center; padding:40px; color:#999; font-size:14px; }
+
+  /* 告警页 */
+  .alert-container { padding:16px; }
+  .health-cards { display:grid; grid-template-columns:repeat(auto-fit, minmax(140px, 1fr)); gap:12px; margin-bottom:16px; }
+  .health-card { background:#fff; border-radius:12px; padding:14px; box-shadow:0 1px 3px rgba(0,0,0,0.08); text-align:center; }
+  .health-card .label { font-size:12px; color:#888; margin-bottom:6px; }
+  .health-card .value { font-size:18px; font-weight:600; color:#333; }
+  .health-card .value.ok { color:#52c41a; }
+  .health-card .value.warn { color:#fa8c16; }
+  .health-card .value.err { color:#ff4d4f; }
+  .metric-card { background:#fff; border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .metric-card h3 { font-size:15px; margin-bottom:12px; color:#333; display:flex; justify-content:space-between; align-items:center; }
+  .metric-card h3 .refresh { font-size:12px; color:#4a90d9; cursor:pointer; font-weight:normal; }
+  .metric-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(120px, 1fr)); gap:12px; }
+  .metric-item { text-align:center; padding:10px; background:#f8f9fa; border-radius:8px; }
+  .metric-item .num { font-size:20px; font-weight:600; color:#4a90d9; }
+  .metric-item .desc { font-size:11px; color:#888; margin-top:4px; }
+  .alert-config { background:#fff; border-radius:12px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+  .alert-config h3 { font-size:15px; margin-bottom:12px; color:#333; }
+  .alert-config p { font-size:13px; color:#666; line-height:1.8; }
+  .alert-config .threshold { display:inline-block; background:#fff7e6; color:#fa8c16; padding:2px 8px; border-radius:4px; font-size:12px; margin:0 4px; }
+</style>
+</head>
+<body>
+  <div class="header">🏪 门店运营智能助手</div>
+  <div class="tabs">
+    <div class="tab active" onclick="switchTab('chat')">💬 对话</div>
+    <div class="tab" onclick="switchTab('repair')">🔧 报修</div>
+    <div class="tab" onclick="switchTab('alert')">🔔 告警</div>
+  </div>
+
+  <!-- 对话页 -->
+  <div class="page active" id="page-chat">
+    <div class="store-bar">
+      <span>门店：<select id="chatStore">
+        <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
+        <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
+      </select></span>
+      <span id="chatStatus">在线</span>
+    </div>
+    <div class="chat-area" id="chatArea">
+      <div class="msg bot"><div class="bubble">你好！我是门店运营助手，可以帮你：
+• 设备报修（说"收银机坏了报修"）
+• 库存查询（说"可乐杯还有多少"）
+• 促销查询（说"P01 活动还能用吗"）
+• 运营知识（说"收银机死机怎么办"）</div></div>
+    </div>
+    <div class="quick-actions">
+      <button onclick="quickSend('收银机死机了怎么办')">收银机死机</button>
+      <button onclick="quickSend('可乐杯还有多少库存')">查库存</button>
+      <button onclick="quickSend('P01 满100减20还能用吗')">查促销</button>
+      <button onclick="quickSend('制冰机不出冰，帮我报修')">报修</button>
+    </div>
+    <div class="input-area">
+      <input type="text" id="msgInput" placeholder="输入消息，回车发送..." onkeydown="if(event.key==='Enter')sendMsg()">
+      <button id="sendBtn" onclick="sendMsg()">发送</button>
+    </div>
+  </div>
+
+  <!-- 报修页 -->
+  <div class="page" id="page-repair">
+    <div class="repair-container">
+      <div class="sub-tabs">
+        <div class="sub-tab active" onclick="switchSubTab('submit')">提交报修</div>
+        <div class="sub-tab" onclick="switchSubTab('list')">工单列表</div>
+      </div>
+
+      <!-- 提交报修 -->
+      <div id="repair-submit">
+        <div class="form-card">
+          <h3>📝 新建报修工单</h3>
+          <div class="form-group">
+            <label>门店</label>
+            <select id="repairStore">
+              <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
+              <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>设备名称</label>
+            <input type="text" id="repairDevice" placeholder="如：收银机、制冰机、空调">
+          </div>
+          <div class="form-group">
+            <label>故障描述</label>
+            <textarea id="repairDesc" placeholder="详细描述设备故障现象，如：收银机死机，屏幕无响应，重启无效"></textarea>
+          </div>
+          <div class="form-group">
+            <label>优先级</label>
+            <select id="repairPriority">
+              <option value="普通">普通（24小时内响应）</option>
+              <option value="紧急">紧急（2小时内响应）</option>
+            </select>
+          </div>
+          <button class="btn-primary" id="submitRepairBtn" onclick="submitRepair()">提交报修</button>
+        </div>
+      </div>
+
+      <!-- 工单列表 -->
+      <div id="repair-list" style="display:none;">
+        <div class="filter-bar">
+          <select id="filterStore" onchange="loadOrders()">
+            <option value="">全部门店</option>
+            <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
+            <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
+          </select>
+          <select id="filterStatus" onchange="loadOrders()">
+            <option value="">全部状态</option>
+            <option value="已受理">已受理</option>
+            <option value="已派单">已派单</option>
+            <option value="维修中">维修中</option>
+            <option value="已解决">已解决</option>
+            <option value="已关闭">已关闭</option>
+          </select>
+          <button onclick="loadOrders()" style="padding:6px 14px;background:#4a90d9;color:#fff;border:none;border-radius:8px;font-size:13px;cursor:pointer;">刷新</button>
+        </div>
+        <div class="order-list" id="orderList">
+          <div class="empty">加载中...</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 告警页 -->
+  <div class="page" id="page-alert">
+    <div class="alert-container">
+      <div class="health-cards" id="healthCards">
+        <div class="health-card"><div class="label">服务状态</div><div class="value" id="h-status">加载中</div></div>
+        <div class="health-card"><div class="label">LLM 在线</div><div class="value" id="h-llm">加载中</div></div>
+        <div class="health-card"><div class="label">向量库</div><div class="value" id="h-vector">加载中</div></div>
+        <div class="health-card"><div class="label">会话存储</div><div class="value" id="h-session">加载中</div></div>
+        <div class="health-card"><div class="label">数据库</div><div class="value" id="h-db">加载中</div></div>
+      </div>
+
+      <div class="metric-card">
+        <h3>📊 运行指标（近5分钟）<span class="refresh" onclick="loadMetrics()">↻ 刷新</span></h3>
+        <div class="metric-grid">
+          <div class="metric-item"><div class="num" id="m-total">-</div><div class="desc">请求总数</div></div>
+          <div class="metric-item"><div class="num" id="m-errors">-</div><div class="desc">错误数</div></div>
+          <div class="metric-item"><div class="num" id="m-rate">-</div><div class="desc">错误率</div></div>
+          <div class="metric-item"><div class="num" id="m-avg">-</div><div class="desc">平均延迟(ms)</div></div>
+          <div class="metric-item"><div class="num" id="m-p95">-</div><div class="desc">P95延迟(ms)</div></div>
+        </div>
+      </div>
+
+      <div class="alert-config">
+        <h3>⚙️ 告警配置</h3>
+        <p>
+          • 错误率阈值：<span class="threshold">≥ 5%</span>（5分钟窗口）<br>
+          • 延迟阈值：<span class="threshold">P95 ≥ 3000ms</span><br>
+          • 告警渠道：飞书群机器人（自动推送）<br>
+          • 冷却时间：10分钟（避免刷屏）<br>
+          • 样本要求：窗口内请求数 ≥ 5 才触发告警
+        </p>
+        <p style="margin-top:10px;color:#999;font-size:12px;">
+          告警触发后自动发送到飞书群，文案格式："🔔 门店助手服务告警 / 错误率 xx% / P95 xxms"
+        </p>
+      </div>
+    </div>
+  </div>
+
+<script>
+let sessionId = null;
+let expandedOrder = null;
+
+// Tab 切换
+function switchTab(tab) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('page-' + tab).classList.add('active');
+  if (tab === 'repair') loadOrders();
+  if (tab === 'alert') { loadHealth(); loadMetrics(); }
+}
+
+function switchSubTab(sub) {
+  document.querySelectorAll('.sub-tab').forEach(t => t.classList.remove('active'));
+  event.target.classList.add('active');
+  document.getElementById('repair-submit').style.display = sub === 'submit' ? 'block' : 'none';
+  document.getElementById('repair-list').style.display = sub === 'list' ? 'block' : 'none';
+  if (sub === 'list') loadOrders();
+}
+
+// ========== 对话页 ==========
+const chatArea = document.getElementById('chatArea');
+const msgInput = document.getElementById('msgInput');
+const sendBtn = document.getElementById('sendBtn');
+
+function addMsg(text, type, isTool) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + type;
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble' + (isTool ? ' tool' : '');
+  bubble.textContent = text;
+  div.appendChild(bubble);
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function addLoading() {
+  const div = document.createElement('div');
+  div.className = 'msg bot';
+  div.id = 'loadingMsg';
+  div.innerHTML = '<div class="bubble"><span class="loading"></span></div>';
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+function removeLoading() {
+  const el = document.getElementById('loadingMsg');
+  if (el) el.remove();
+}
+
+async function sendMsg() {
+  const text = msgInput.value.trim();
+  if (!text) return;
+  msgInput.value = '';
+  sendBtn.disabled = true;
+  addMsg(text, 'user');
+  addLoading();
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        message: text,
+        store_id: document.getElementById('chatStore').value,
+        user_id: 'web_user',
+        session_id: sessionId
+      })
+    });
+    const data = await res.json();
+    removeLoading();
+    sessionId = data.session_id;
+    if (data.tool_results && data.tool_results.length > 0) {
+      data.tool_results.forEach(t => {
+        if (t.name === 'report_repair' && t.output) {
+          addMsg(`🔧 工单已创建：${t.output.order_no}\n设备：${t.output.device}\n状态：${t.output.status}\n响应：${t.output.sla}`, 'bot', true);
+        } else if (t.name === 'query_inventory' && t.output) {
+          addMsg(`📦 ${t.output.material || '库存'}：${t.output.stock}${t.output.unit || ''}\n${t.output.suggestion || ''}`, 'bot', true);
+        } else if (t.name === 'check_promotion' && t.output) {
+          addMsg(`🎁 ${t.output.policy_name || ''}（${t.output.policy_code || ''}）\n${t.output.rule || ''}\n状态：${t.output.status || ''}`, 'bot', true);
+        }
+      });
+    }
+    addMsg(data.answer, 'bot');
+  } catch (e) {
+    removeLoading();
+    addMsg('请求失败：' + e.message, 'bot');
+  }
+  sendBtn.disabled = false;
+  msgInput.focus();
+}
+
+function quickSend(text) {
+  msgInput.value = text;
+  sendMsg();
+}
+
+// ========== 报修页 ==========
+async function submitRepair() {
+  const store = document.getElementById('repairStore').value;
+  const device = document.getElementById('repairDevice').value.trim();
+  const desc = document.getElementById('repairDesc').value.trim();
+  const priority = document.getElementById('repairPriority').value;
+  if (!device || !desc) { alert('请填写设备名称和故障描述'); return; }
+  const btn = document.getElementById('submitRepairBtn');
+  btn.disabled = true;
+  btn.textContent = '提交中...';
+  try {
+    const message = `${store} ${device}故障：${desc}，优先级${priority}，帮我报修`;
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ message, store_id: store, user_id: 'web_repair' })
+    });
+    const data = await res.json();
+    if (data.tool_results && data.tool_results[0]?.output?.order_no) {
+      const order = data.tool_results[0].output;
+      alert(`✅ 报修成功！\n工单号：${order.order_no}\n设备：${order.device}\n状态：${order.status}\n响应：${order.sla}`);
+      document.getElementById('repairDevice').value = '';
+      document.getElementById('repairDesc').value = '';
+    } else {
+      alert('提交成功：' + (data.answer || '已受理'));
+    }
+  } catch (e) {
+    alert('提交失败：' + e.message);
+  }
+  btn.disabled = false;
+  btn.textContent = '提交报修';
+}
+
+async function loadOrders() {
+  const listEl = document.getElementById('orderList');
+  listEl.innerHTML = '<div class="empty">加载中...</div>';
+  const store = document.getElementById('filterStore').value;
+  const status = document.getElementById('filterStatus').value;
+  let url = '/api/repairs?limit=50';
+  if (store) url += '&store_id=' + store;
+  try {
+    const res = await fetch(url);
+    const data = await res.json();
+    let orders = data.orders || data || [];
+    if (status) orders = orders.filter(o => o.status === status);
+    if (orders.length === 0) {
+      listEl.innerHTML = '<div class="empty">暂无工单</div>';
+      return;
+    }
+    listEl.innerHTML = orders.map(o => `
+      <div class="order-item" onclick="toggleOrder('${o.order_no}', this)">
+        <div class="order-header">
+          <span class="order-no">${o.order_no}</span>
+          <span class="status-tag status-${o.status}">${o.status}</span>
+        </div>
+        <div class="order-info">
+          <span>🏪 ${o.store_id}</span>
+          <span>🔧 ${o.device || '-'}</span>
+          <span>⏰ ${o.created_at || '-'}</span>
+          ${o.actor ? `<span>👤 ${o.actor}</span>` : ''}
+        </div>
+        <div class="order-info" style="color:#aaa;margin-top:2px;">${o.problem_desc || ''}</div>
+      </div>
+    `).join('');
+  } catch (e) {
+    listEl.innerHTML = '<div class="empty">加载失败：' + e.message + '</div>';
+  }
+}
+
+async function toggleOrder(orderNo, itemEl) {
+  const existing = itemEl.nextElementSibling;
+  if (existing && existing.classList.contains('order-detail')) {
+    existing.remove();
+    return;
+  }
+  document.querySelectorAll('.order-detail').forEach(d => d.remove());
+  try {
+    const res = await fetch('/api/repairs/' + orderNo);
+    const o = await res.json();
+    const detail = document.createElement('div');
+    detail.className = 'order-detail';
+    let actions = '';
+    if (o.status === '已受理') actions += `<button class="primary" onclick="updateStatus('${o.order_no}','已派单')">📋 派单</button>`;
+    if (o.status === '已派单') actions += `<button class="primary" onclick="updateStatus('${o.order_no}','维修中')">🛠️ 接单（开始维修）</button>`;
+    if (o.status === '维修中') actions += `<button class="primary" onclick="updateStatus('${o.order_no}','已解决')">✅ 标记已解决</button>`;
+    if (o.status === '已解决') actions += `<button onclick="updateStatus('${o.order_no}','已关闭',true)">📦 关闭工单（需店长确认）</button>`;
+    detail.innerHTML = `
+      <p><strong>工单号：</strong>${o.order_no}</p>
+      <p><strong>门店：</strong>${o.store_id} | <strong>设备：</strong>${o.device || '-'}</p>
+      <p><strong>故障描述：</strong>${o.problem_desc || '-'}</p>
+      <p><strong>优先级：</strong>${o.priority || '-'} | <strong>SLA：</strong>${o.sla || '-'}</p>
+      <p><strong>当前状态：</strong><span class="status-tag status-${o.status}">${o.status}</span></p>
+      <p><strong>创建时间：</strong>${o.created_at || '-'}</p>
+      ${o.actor ? `<p><strong>处理人：</strong>${o.actor}</p>` : '<p><strong>处理人：</strong>未分配</p>'}
+      ${o.confirmed ? `<p><strong>店长确认：</strong>已确认</p>` : ''}
+      <div class="actions">${actions}</div>
+    `;
+    itemEl.after(detail);
+  } catch (e) {
+    alert('加载详情失败：' + e.message);
+  }
+}
+
+async function updateStatus(orderNo, status, needConfirm) {
+  if (needConfirm && !confirm('确认关闭此工单？关闭后不可重新打开。')) return;
+  const actor = prompt('请输入处理人姓名/工号：', '维修工');
+  if (!actor) return;
+  try {
+    const body = { status, actor };
+    if (needConfirm) body.confirm = true;
+    const res = await fetch('/api/repairs/' + orderNo + '/status', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(body)
+    });
+    const data = await res.json();
+    if (data.ok || data.status) {
+      alert('✅ 状态已更新为：' + status);
+      loadOrders();
+    } else {
+      alert('更新失败：' + (data.detail || JSON.stringify(data)));
+    }
+  } catch (e) {
+    alert('更新失败：' + e.message);
+  }
+}
+
+// ========== 告警页 ==========
+async function loadHealth() {
+  try {
+    const res = await fetch('/healthz');
+    const d = await res.json();
+    document.getElementById('h-status').textContent = d.status === 'ok' ? '正常' : d.status;
+    document.getElementById('h-status').className = 'value ' + (d.status === 'ok' ? 'ok' : 'err');
+    document.getElementById('h-llm').textContent = d.llm_online ? '在线' : '离线';
+    document.getElementById('h-llm').className = 'value ' + (d.llm_online ? 'ok' : 'warn');
+    document.getElementById('h-vector').textContent = d.vector_store;
+    document.getElementById('h-session').textContent = d.session_store;
+    document.getElementById('h-db').textContent = d.db_store;
+  } catch (e) {
+    document.getElementById('h-status').textContent = '无法连接';
+    document.getElementById('h-status').className = 'value err';
+  }
+}
+
+async function loadMetrics() {
+  try {
+    const res = await fetch('/metrics');
+    const text = await res.text();
+    const metrics = {};
+    text.split('\n').forEach(line => {
+      if (line.startsWith('store_agent_')) {
+        const [key, val] = line.split(' ');
+        metrics[key] = parseFloat(val);
+      }
+    });
+    const total = metrics['store_agent_requests_total'] || 0;
+    const errors = metrics['store_agent_errors_total'] || 0;
+    const rate = total > 0 ? (errors / total * 100).toFixed(1) + '%' : '0%';
+    document.getElementById('m-total').textContent = total;
+    document.getElementById('m-errors').textContent = errors;
+    document.getElementById('m-rate').textContent = rate;
+    document.getElementById('m-avg').textContent = metrics['store_agent_avg_latency_ms'] || 0;
+    document.getElementById('m-p95').textContent = metrics['store_agent_p95_latency_ms'] || 0;
+  } catch (e) {
+    document.getElementById('m-total').textContent = '-';
+  }
+}
+
+// 页面加载时检查健康
+loadHealth();
+</script>
+</body>
+</html>
