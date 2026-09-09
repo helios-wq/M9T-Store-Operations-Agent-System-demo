@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 项目根：E:\aa面试准备激素理解\project1_store_agent
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))  # 项目根目录
 
 from app.rag.vector_store import get_vector_store, reset_vector_store  # noqa: E402
 
