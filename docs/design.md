@@ -6,7 +6,7 @@
 flowchart LR
     U[店长/店员<br/>企业微信] --> W[企微回调 / Webhook]
     U -->|REST/SSE| API[FastAPI 网关]
-    API --> AG[Agent 状态机<br/>LangGraph]
+    API --> AG[Agent 状态机<br/>4节点条件路由]
     AG --> INT[意图识别节点]
     AG --> RET[知识检索节点]
     AG --> TOOL[工具执行节点]
@@ -26,10 +26,11 @@ flowchart LR
 
 ## 2. 核心设计决策
 
-### 2.1 为什么用 LangGraph 而不是裸 LangChain Chain
+### 2.1 为什么用状态机而不是线性 Chain
 - 需求里存在**会话中意图切换**（报修一半改问库存）、**步骤回退**（工具失败降级检索）、
   **多轮工具调用链**（ReAct 循环）——这些是图结构而非线性链；
-- LangGraph 的 `StateGraph` 把节点与路由显式化，便于测试单个节点、回放失败会话。
+- 状态机把节点与路由显式化，便于测试单个节点、回放失败会话；
+- 双模式执行：在线走 LangGraph StateGraph，离线/异常降级自研手动执行器。
 
 ### 2.2 RAG 为什么多路检索而不是单路向量
 - 门店文档口语化严重（"还有多少"、"坏了"），纯向量检索对短查询、低频词召回差；
@@ -45,7 +46,7 @@ flowchart LR
 - 工具失败（门店号无效/物料不存在）→ **降级返回知识库检索方案**，不让用户空手而归；
 - 超范围问题 → 汇总上下文转人工（handoff_summary 供人工接续）。
 
-### 2.5 基础设施降级策略（可观测性 & 面试亮点）
+### 2.5 基础设施降级策略（可观测性）
 | 组件 | 生产 | 本地演示 | 切换方式 |
 |---|---|---|---|
 | 向量库 | Milvus (IP 检索) | 内存向量库 + index.json | 连接失败自动降级 |
@@ -72,13 +73,3 @@ flowchart LR
 | GET/POST | /wecom/callback | 企微验签 + 消息回调 |
 | GET | /healthz | 健康检查（含各组件降级状态） |
 | GET | /metrics | Prometheus 文本指标 |
-
-## 4. 面试话术要点
-- **"多 Agent 状态机"**：不是说有多个 Agent 实例，而是把意图识别、检索、工具、输出拆成
-  4 个可独立测试的节点 + 显式路由边，异常路径（工具失败降级、转人工）是图的一等公民；
-- **"会话中意图切换"**：state 中 intent 字段每轮重算，切换时清理旧工具中间状态；
-- **"步骤回退"**：工具节点失败置 needs_retrieval，路由边回退到检索节点；输出节点上下文
-  不足可 retry_retrieval（上限 2 轮防死循环）；
-- **"SSE 流式"**：事件类型分 intent/retrieval/tool/answer_delta/done，Nginx 需关
-  proxy_buffering（nginx.conf 已配置），否则流式被攒批；
-- **"可用性 99%"**：降级链路 + 监控告警 + 单元测试共同支撑；/healthz 暴露每个组件的实际后端。
