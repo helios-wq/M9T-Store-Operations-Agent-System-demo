@@ -56,7 +56,7 @@ project1_store_agent/
 │   ├── monitor.py           # 监控告警 + Prometheus 指标
 │   ├── llm/client.py        # LLM 客户端（在线/离线双模式）
 │   ├── agent/
-│   │   ├── graph.py         # LangGraph 状态机编排
+│   │   ├── graph.py         # Agent 状态机编排（LangGraph/手动执行器双模式）
 │   │   ├── nodes.py         # 意图识别/检索/工具/输出 4 节点
 │   │   ├── state.py         # Agent 状态定义
 │   │   └── tools.py         # 报修/库存/促销 3 个工具
