@@ -83,7 +83,7 @@ project1_store_agent/
 │   ├── init_db.py           # 初始化数据库
 │   └── simulate_client.py   # 命令行对话模拟
 ├── tests/                    # 单元测试（33 passed）
-├── docs/design.md            # 架构设计文档 + 面试话术
+├── docs/design.md            # 架构设计文档
 ├── requirements.txt
 ├── .env.example              # 环境变量模板（Key 已脱敏）
 ├── .gitignore
