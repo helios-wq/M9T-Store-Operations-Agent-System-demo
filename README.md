@@ -23,6 +23,212 @@
 | 📱 网页前端 | 三标签页（对话/报修/告警），响应式设计，手机浏览器直接用 |
 | 🏢 企业微信 | 群机器人主动推送 + 回调被动回复，维修工群内指令推进工单状态 |
 
+## 👥 角色分工（谁用这个系统？做什么？）
+
+系统设计为**多角色协作**，不同角色看到的界面和能做的操作不同。
+
+### 角色总览
+
+| 角色 | 日常操作 | 使用界面 | 技术要求 |
+|---|---|---|---|
+| 👤 **店员/店长** | 提问、报修、查库存、查促销 | 网页前端 / 企业微信 | 零技术，会打字就行 |
+| 🔧 **维修工** | 接单、推进工单状态、查看报修详情 | 企业微信群 / 网页前端 | 零技术 |
+| 📊 **运营人员** | 维护主数据、更新 SOP 文档、管理促销活动 | Excel + 命令行脚本 / API | 会用 Excel，会敲命令 |
+| ⚙️ **开发者/运维** | 部署服务、导入数据、配置定时任务、排查问题 | 命令行 / Docker / 代码 | 需要技术背景 |
+| 🔐 **系统管理员** | 配置密钥、管理权限、监控告警 | `.env` 配置 / 监控面板 | 需要技术背景 |
+
+---
+
+### 👤 店员/店长（最主要使用者）
+
+**做什么：**
+- 自然语言提问查 SOP（"制冰机不出冰怎么办"）
+- 查物料库存（"可乐杯还有多少"）
+- 核对促销规则（"P01 满100减20还能用吗"）
+- 设备报修（"收银机死机了，帮我报修"）
+- 转人工投诉（"我要找经理投诉"）
+
+**用什么：**
+- 网页前端：`http://服务器IP`（三标签页：对话/报修/告警）
+- 企业微信群：直接 @机器人 或发消息
+
+**不做什么：**
+- ❌ 不需要懂技术、不需要碰命令行
+- ❌ 不需要知道数据存在哪、怎么更新
+- ❌ 不需要配置任何东西
+
+**典型对话示例：**
+```
+店长：可乐杯还有多少库存？
+助手：门店 S001 可乐杯当前库存 1200 个，补货线 500，库存充足。
+
+店长：收银机死机了，帮我报修
+助手：报修工单已受理：单号 RX12345678，设备收银机，24小时内响应...
+```
+
+---
+
+### 🔧 维修工
+
+**做什么：**
+- 接收企微群报修推送
+- 接单并推进工单状态（已派单→维修中→已解决）
+- 查看工单详情（门店、设备、故障描述）
+
+**用什么：**
+- 企业微信群（收到推送 → 回复指令推进状态）
+- 网页前端报修标签页（可视化操作）
+
+**不做什么：**
+- ❌ 不需要创建工单（店长创建）
+- ❌ 不能关闭工单（需要店长确认）
+
+**典型操作：**
+```
+企微群收到推送：🔧 新报修工单 RX12345678｜门店 S001｜设备 收银机
+
+维修工回复：RX12345678 已派单
+系统：工单已更新为「已派单」
+
+维修工回复：RX12345678 维修中
+系统：工单已更新为「维修中」
+
+维修工回复：RX12345678 已解决
+系统：工单已更新为「已解决」，等待店长确认关闭
+```
+
+---
+
+### 📊 运营人员
+
+**做什么：**
+- 维护门店/设备/员工/促销/库存主数据（Excel 批量导入）
+- 更新 SOP 运营文档（Markdown）
+- 管理促销活动（上线/下架）
+- 查看运营数据（对话日志、工单统计）
+
+**用什么：**
+- Excel（编辑 `data/templates/` 下的 CSV 模板）
+- 命令行脚本（`python scripts/import_*.py`）
+- REST API（对接管理后台）
+
+**不做什么：**
+- ❌ 不需要写代码（脚本已经写好了）
+- ❌ 不需要部署服务（运维做）
+
+**典型操作：**
+```bash
+# 1. 用 Excel 打开 data/templates/stores.csv，新增一家门店
+# 2. 保存为 CSV（UTF-8）
+# 3. 运行导入
+python scripts/import_stores.py data/templates/stores.csv
+
+# 4. 更新 SOP 文档
+# 编辑 data/raw_docs/ 下的 Markdown 文件
+python scripts/build_index.py  # 重建向量索引
+```
+
+---
+
+### ⚙️ 开发者/运维
+
+**做什么：**
+- 部署服务（Docker / 本地）
+- 初始化数据库和主数据
+- 配置定时任务（库存同步、促销过期检查）
+- 排查问题（查看日志、健康检查）
+- 二次开发（扩展功能、对接外部系统）
+
+**用什么：**
+- 命令行（Linux / Windows）
+- Docker / Docker Compose
+- 代码编辑器（Python）
+
+**典型操作：**
+```bash
+# 部署
+cd deploy
+docker compose -f docker-compose.lite.yml up -d --build
+
+# 健康检查
+curl http://127.0.0.1:8000/healthz
+
+# 查看日志
+docker compose -f docker-compose.lite.yml logs app --tail 50
+
+# 配置定时任务
+crontab -e
+*/10 * * * * python scripts/sync_inventory.py
+0 2 * * * python scripts/check_promotions.py
+```
+
+---
+
+### 🔐 系统管理员
+
+**做什么：**
+- 配置 API Key（LLM、Embedding）
+- 配置 Webhook（飞书告警、企微推送）
+- 配置数据库连接（MySQL、Redis）
+- 监控系统健康状态
+- 管理告警阈值
+
+**用什么：**
+- `.env` 配置文件
+- 监控面板（Prometheus 指标）
+- 飞书/企微后台（机器人配置）
+
+**典型配置：**
+```bash
+# .env 文件
+LLM_API_KEY=sk-xxx          # DeepSeek API Key
+EMBED_API_KEY=sk-xxx        # 硅基流动 Embedding Key
+WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
+FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
+MYSQL_HOST=mysql
+MYSQL_USER=root
+MYSQL_PASSWORD=xxx
+```
+
+---
+
+### 角色协作流程图
+
+```
+店员/店长提问/报修
+        │
+        ▼
+   Agent 自动处理
+   ├─ 查 SOP → 直接回答
+   ├─ 查库存 → 查 inventory 表
+   ├─ 查促销 → 查 promotions 表
+   └─ 报修 → 创建工单 + 推企微群
+        │
+        ▼
+   维修工（企微群接单）
+        │
+        ▼
+   工单状态流转（已派单→维修中→已解决）
+        │
+        ▼
+   店长确认关闭工单
+```
+
+### 数据维护责任表
+
+| 数据类型 | 谁来维护 | 怎么维护 | 频率 |
+|---|---|---|---|
+| 知识库/SOP | 运营人员 | 改 Markdown → 重建索引 | 政策变更时 |
+| 物料库存 | 系统自动 + 运营 | ERP 定时同步 + 手动修正 | 每 10 分钟 |
+| 促销政策 | 运营人员 | CSV 导入 / API | 活动上线时 |
+| 门店信息 | 运营人员 | CSV 导入 / API | 开店/闭店时 |
+| 设备信息 | 运营人员 | CSV 导入 / API | 采购/报废时 |
+| 员工信息 | 运营人员 | CSV 导入 / API | 入职/离职时 |
+| 报修工单 | 系统自动 | 状态机自动流转 | 实时 |
+| 配置/密钥 | 系统管理员 | 改 `.env` → 重启 | 密钥轮换时 |
+
+---
+
 ## 🏗️ 技术架构
 
 ```
@@ -105,6 +311,8 @@ FastAPI（REST + SSE 流式）
 
 ### 数据导入流程（从零到可用）
 
+> ⚠️ **以下是开发者/运维视角的操作**，店员/店长不需要做这些，直接用网页前端或企微对话即可。
+
 ```
 第1步：准备数据
     │
@@ -160,7 +368,7 @@ project1_store_agent/
 ├── app/
 │   ├── main.py              # FastAPI 入口（REST + SSE）
 │   ├── config.py            # 配置中心（.env 读取）
-│   ├── db.py                # MySQL/SQLite 持久化 + 工单状态机
+│   ├── db.py                # MySQL/SQLite 持久化 + 7张表CRUD + 工单状态机
 │   ├── schemas.py           # Pydantic 请求/响应模型
 │   ├── session.py           # Redis/内存会话管理
 │   ├── wecom.py             # 企业微信接入（回调 + 机器人推送）
@@ -181,8 +389,15 @@ project1_store_agent/
 │   └── eval/                # 评测集 + 评测脚本
 ├── data/
 │   ├── gen_docs.py          # 生成 300+ 份样例门店文档
-│   ├── raw_docs/            # 原始运营文档
-│   └── index.json           # 向量索引（354 条 Chunk）
+│   ├── raw_docs/            # 原始运营文档（Markdown）
+│   ├── templates/           # 数据导入模板（CSV，含示例数据）
+│   │   ├── stores.csv       # 门店模板
+│   │   ├── devices.csv      # 设备模板
+│   │   ├── staff.csv        # 员工模板
+│   │   ├── promotions.csv   # 促销模板
+│   │   └── inventory.csv    # 库存模板
+│   ├── index.json           # 向量索引（build_index.py 生成）
+│   └── app.db               # SQLite 数据库（MySQL 不可用时降级）
 ├── deploy/
 │   ├── Dockerfile           # 应用镜像
 │   ├── docker-compose.yml   # 完整版（Milvus + MySQL + Redis + Nginx）
@@ -190,42 +405,22 @@ project1_store_agent/
 │   ├── nginx.conf           # Nginx 反代配置（SSE 支持）
 │   └── html/                # 前端静态页面
 ├── scripts/
+│   ├── gen_docs.py          # 生成样例运营文档
 │   ├── build_index.py       # 构建向量索引
 │   ├── init_db.py           # 初始化数据库
-│   └── simulate_client.py   # 命令行对话模拟
-├── tests/                    # 单元测试（33 passed）
+│   ├── init_master_data.py  # 初始化主数据（库存/促销/门店/设备/员工）
+│   ├── simulate_client.py   # 命令行模拟对话
+│   ├── sync_inventory.py    # 库存同步（模拟ERP/CSV导入/手动调整）
+│   ├── import_stores.py     # 门店信息批量导入（Excel/CSV）
+│   ├── import_devices.py    # 设备台账批量导入（Excel/CSV）
+│   ├── import_staff.py      # 员工信息批量导入（Excel/CSV）
+│   ├── import_promotions.py # 促销政策批量导入（Excel/CSV）
+│   └── check_promotions.py  # 促销活动自动过期检查
+├── tests/                    # 单元测试（47 passed）
 ├── docs/design.md            # 架构设计文档
 ├── requirements.txt
 ├── .env.example              # 环境变量模板（Key 已脱敏）
 ├── .gitignore
-├── pytest.ini
-├── scripts/
-│   ├── gen_docs.py            # 生成样例运营文档
-│   ├── build_index.py         # 构建向量索引
-│   ├── init_db.py             # 初始化数据库
-│   ├── init_master_data.py    # 初始化主数据（库存/促销/门店/设备/员工）
-│   ├── simulate_client.py     # 命令行模拟对话
-│   ├── sync_inventory.py      # 库存同步（模拟ERP/CSV导入/手动调整）
-│   ├── import_stores.py       # 门店信息批量导入（Excel/CSV）
-│   ├── import_devices.py      # 设备台账批量导入（Excel/CSV）
-│   ├── import_staff.py        # 员工信息批量导入（Excel/CSV）
-│   ├── import_promotions.py   # 促销政策批量导入（Excel/CSV）
-│   └── check_promotions.py    # 促销活动自动过期检查
-├── data/
-│   ├── raw_docs/              # 原始运营文档（Markdown）
-│   ├── templates/             # 数据导入模板（CSV，含示例数据）
-│   │   ├── stores.csv         # 门店模板
-│   │   ├── devices.csv        # 设备模板
-│   │   ├── staff.csv          # 员工模板
-│   │   ├── promotions.csv     # 促销模板
-│   │   └── inventory.csv      # 库存模板
-│   ├── index.json             # 向量索引（build_index.py 生成）
-│   └── app.db                 # SQLite 数据库（MySQL 不可用时降级）
-├── tests/                     # 单元测试（47 passed）
-├── deploy/                    # Docker 部署配置
-├── docs/design.md             # 架构设计文档
-├── requirements.txt
-├── .env.example
 ├── pytest.ini
 └── README.md
 ```
@@ -260,6 +455,8 @@ uvicorn app.main:app --reload --port 8000
 访问 http://localhost:8000 查看前端页面，http://localhost:8000/docs 查看 API 文档。
 
 ## 📊 数据导入（生产环境必备）
+
+> ⚠️ **以下是运营人员/开发者视角的操作**，用于初始化业务数据。店员/店长日常使用不需要做这些。
 
 系统内置 5 张主数据表，支持 **Excel/CSV 批量导入** + **REST API 管理**，无需对接外部系统即可快速上线。
 
