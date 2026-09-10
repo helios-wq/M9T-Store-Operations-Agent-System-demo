@@ -39,6 +39,38 @@ PROMOTIONS: Dict[str, dict] = {
 # 设备类型
 DEVICE_TYPES = ["收银机", "制冰机", "冷藏冰箱", "冷冻柜", "烤箱", "炸炉", "空调", "点餐屏", "打印机", "微波炉"]
 
+# 主数据初始化标志（首次查询时自动把硬编码数据写入数据库）
+_master_data_initialized = False
+
+
+def _ensure_master_data() -> None:
+    """首次运行时把硬编码的库存/促销/门店/设备主数据写入数据库。
+
+    生产环境应通过 ERP/营销系统同步，这里保证零配置演示可用。
+    已初始化后跳过（幂等）。
+    """
+    global _master_data_initialized
+    if _master_data_initialized:
+        return
+    try:
+        from ..db import upsert_inventory, upsert_promotion, upsert_store, list_inventory
+        # 库存已有数据则不覆盖（生产环境已同步过）
+        existing = list_inventory(limit=1)
+        if not existing:
+            for material, info in INVENTORY.items():
+                # 给 S001 初始化一份演示数据，其他门店按需同步
+                upsert_inventory("S001", material, info["stock"], info["unit"], info["reorder"])
+        # 促销政策（全量初始化，可被管理接口覆盖）
+        for code, p in PROMOTIONS.items():
+            upsert_promotion(code, p["name"], p["rule"], p["status"], "", p["valid_until"])
+        # 门店主数据（S001-S010 初始化演示，其余按需扩展）
+        for i in range(1, 11):
+            sid = f"S{i:03d}"
+            upsert_store(sid, f"{sid} 直营门店", f"上海市演示区路{i}号", f"021-0000{i:04d}", f"店长{i}", "营业中")
+        _master_data_initialized = True
+    except Exception as e:  # pragma: no cover
+        print(f"[tools] 主数据初始化失败（将使用硬编码 fallback）：{e}")
+
 
 def _normalize_store(store_id: str) -> str:
     """S80 → S080；容忍用户输入格式差异。"""
@@ -116,11 +148,38 @@ def report_repair(store_id: str, device: str, problem_desc: str, priority: str =
 
 # ---------------------------------------------------------------- 工具 2
 def query_inventory(store_id: str, material: str) -> dict:
-    """物料库存查询：返回指定物料库存与补货建议。"""
+    """物料库存查询：返回指定物料库存与补货建议。
+
+    优先从数据库查询（支持 ERP 实时同步）；数据库无数据时回退硬编码模拟数据。
+    """
     err = _validate_store(store_id)
     if err:
         return {"ok": False, "error": err}
-    # 门店间库存做小幅度浮动，模拟真实数据
+    _ensure_master_data()
+    material = material.strip()
+    # 优先从数据库查询
+    try:
+        from ..db import get_inventory, list_inventory
+        # 精确匹配
+        record = get_inventory(store_id, material)
+        if not record:
+            # 模糊匹配：遍历该门店所有物料，找包含关系
+            all_items = list_inventory(store_id=store_id, limit=200)
+            for item in all_items:
+                if material in item["material"] or item["material"] in material:
+                    record = item
+                    break
+        if record:
+            stock = int(record["stock"])
+            reorder = int(record.get("reorder_point", 0))
+            return {
+                "ok": True, "store_id": store_id, "material": record["material"],
+                "stock": stock, "unit": record.get("unit", "个"), "reorder_point": reorder,
+                "suggestion": "建议补货" if stock < reorder else "库存充足",
+            }
+    except Exception as e:  # pragma: no cover
+        print(f"[tools] 数据库库存查询失败，回退硬编码：{e}")
+    # 回退：硬编码模拟数据（门店间小幅度浮动）
     seed = sum(ord(c) for c in store_id)
     for name, info in INVENTORY.items():
         if name in material or material in name or material == "":
@@ -135,11 +194,28 @@ def query_inventory(store_id: str, material: str) -> dict:
 
 # ---------------------------------------------------------------- 工具 3
 def check_promotion(store_id: str, policy_code: str) -> dict:
-    """促销政策校验：核对政策编号是否生效及规则详情。"""
+    """促销政策校验：核对政策编号是否生效及规则详情。
+
+    优先从数据库查询（支持动态管理）；数据库无数据时回退硬编码模拟数据。
+    """
     err = _validate_store(store_id)
     if err:
         return {"ok": False, "error": err}
+    _ensure_master_data()
     code = policy_code.strip().upper()
+    # 优先从数据库查询
+    try:
+        from ..db import get_promotion
+        record = get_promotion(code)
+        if record:
+            return {
+                "ok": True, "store_id": store_id, "policy_code": code,
+                "policy_name": record["name"], "rule": record["rule"],
+                "status": record["status"], "valid_until": record.get("valid_until", ""),
+            }
+    except Exception as e:  # pragma: no cover
+        print(f"[tools] 数据库促销查询失败，回退硬编码：{e}")
+    # 回退：硬编码模拟数据
     if code not in PROMOTIONS:
         return {"ok": False, "error": f"未找到政策编号 {code}，可用编号：{', '.join(sorted(PROMOTIONS))}"}
     p = PROMOTIONS[code]
