@@ -136,18 +136,19 @@ def init_db() -> None:
     );
     """
     with _lock:
-        if _backend == "mysql":
-            try:
-                c = _get_mysql()
-                for stmt in mysql_sql.split(";"):
-                    if stmt.strip():
-                        with c.cursor() as cur:
-                            cur.execute(stmt)
-                c.commit()
-                c.close()
-                return
-            except Exception:
-                _backend = "sqlite"
+        # 先尝试 MySQL，成功则用 MySQL，失败则降级到 SQLite
+        try:
+            c = _get_mysql()
+            _backend = "mysql"
+            for stmt in mysql_sql.split(";"):
+                if stmt.strip():
+                    with c.cursor() as cur:
+                        cur.execute(stmt)
+            c.commit()
+            c.close()
+            return
+        except Exception:
+            _backend = "sqlite"
         conn = _get_sqlite()
         conn.executescript(sqlite_sql)
         conn.commit()
@@ -336,6 +337,8 @@ def update_repair_status(order_no: str, status: str, actor: str = "", confirm: b
                             (status, actor, 1 if status == "已关闭" else 0, order_no))
             c.commit()
             c.close()
+            updated = get_repair(order_no)
+            return True, f"工单 {order_no} 已更新为「{status}」", updated
         except Exception:
             pass
     conn = _get_sqlite()
