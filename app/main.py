@@ -15,13 +15,20 @@ from .agent.graph import run_agent, stream_agent
 from .agent.tools import notify_repair_dispatched
 from .config import settings
 from .db import (get_backend, get_repair, init_db, list_repairs,
-                 save_chat_log, update_repair_status)
+                 save_chat_log, update_repair_status,
+                 list_inventory, get_inventory, upsert_inventory,
+                 list_promotions, get_promotion, upsert_promotion,
+                 list_stores, get_store, upsert_store,
+                 list_devices, get_device, upsert_device,
+                 list_staff, get_staff, upsert_staff)
 from .llm.client import llm_client
 from .monitor import metrics
 from .rag.retriever import retriever
 from .rag.vector_store import get_vector_store
 from .schemas import (ChatRequest, ChatResponse, HealthResponse,
                       RepairOut, RepairStatusRequest, RetrieveRequest, SSEEvent)
+from pydantic import BaseModel
+from typing import Optional
 from .session import session_store
 from .wecom import parse_message, verify_signature
 
@@ -239,3 +246,167 @@ def healthz():
 @app.get("/metrics")
 def prom_metrics():
     return PlainTextResponse(metrics.prometheus_text())
+
+
+# ================================================================
+# 主数据管理接口（库存 / 促销 / 门店 / 设备 / 员工）
+# 生产环境建议加鉴权，当前演示版本开放读写
+# ================================================================
+
+# ---------------- 请求体模型 ----------------
+class InventoryRequest(BaseModel):
+    store_id: str
+    material: str
+    stock: int
+    unit: str = "个"
+    reorder_point: int = 0
+
+class PromotionRequest(BaseModel):
+    promo_code: str
+    name: str
+    rule: str
+    status: str = "生效中"
+    valid_from: str = ""
+    valid_until: str = ""
+
+class StoreRequest(BaseModel):
+    store_id: str
+    name: str = ""
+    address: str = ""
+    phone: str = ""
+    manager: str = ""
+    status: str = "营业中"
+
+class DeviceRequest(BaseModel):
+    device_id: str
+    store_id: str
+    device_type: str
+    brand: str = ""
+    model: str = ""
+    purchase_date: str = ""
+    warranty_until: str = ""
+    status: str = "正常"
+
+class StaffRequest(BaseModel):
+    staff_id: str
+    name: str
+    role: str = "店员"
+    phone: str = ""
+    store_id: str = ""
+    status: str = "在职"
+
+
+# ---------------- 库存管理 ----------------
+@app.get("/api/inventory")
+def api_list_inventory(store_id: Optional[str] = None, limit: int = 100):
+    """物料库存列表（可按门店过滤）。"""
+    return list_inventory(store_id=store_id, limit=min(limit, 500))
+
+
+@app.get("/api/inventory/{store_id}/{material}")
+def api_get_inventory(store_id: str, material: str):
+    """查询指定门店指定物料的库存。"""
+    record = get_inventory(store_id, material)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"未找到 {store_id} {material}")
+    return record
+
+
+@app.post("/api/inventory")
+def api_upsert_inventory(req: InventoryRequest):
+    """新增或更新物料库存（upsert）。"""
+    upsert_inventory(req.store_id, req.material, req.stock, req.unit, req.reorder_point)
+    return {"ok": True, "store_id": req.store_id, "material": req.material, "stock": req.stock}
+
+
+# ---------------- 促销管理 ----------------
+@app.get("/api/promotions")
+def api_list_promotions(status: Optional[str] = None, limit: int = 50):
+    """促销政策列表（可按状态过滤）。"""
+    return list_promotions(status=status, limit=min(limit, 200))
+
+
+@app.get("/api/promotions/{promo_code}")
+def api_get_promotion(promo_code: str):
+    """查询指定促销政策详情。"""
+    record = get_promotion(promo_code)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"未找到促销政策 {promo_code}")
+    return record
+
+
+@app.post("/api/promotions")
+def api_upsert_promotion(req: PromotionRequest):
+    """新增或更新促销政策（upsert）。"""
+    upsert_promotion(req.promo_code, req.name, req.rule, req.status, req.valid_from, req.valid_until)
+    return {"ok": True, "promo_code": req.promo_code, "name": req.name, "status": req.status}
+
+
+# ---------------- 门店管理 ----------------
+@app.get("/api/stores")
+def api_list_stores(status: Optional[str] = None, limit: int = 200):
+    """门店列表（可按状态过滤）。"""
+    return list_stores(status=status, limit=min(limit, 500))
+
+
+@app.get("/api/stores/{store_id}")
+def api_get_store(store_id: str):
+    """查询指定门店详情。"""
+    record = get_store(store_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"未找到门店 {store_id}")
+    return record
+
+
+@app.post("/api/stores")
+def api_upsert_store(req: StoreRequest):
+    """新增或更新门店信息（upsert）。"""
+    upsert_store(req.store_id, req.name, req.address, req.phone, req.manager, req.status)
+    return {"ok": True, "store_id": req.store_id, "name": req.name, "status": req.status}
+
+
+# ---------------- 设备管理 ----------------
+@app.get("/api/devices")
+def api_list_devices(store_id: Optional[str] = None, limit: int = 100):
+    """设备清单（可按门店过滤）。"""
+    return list_devices(store_id=store_id, limit=min(limit, 500))
+
+
+@app.get("/api/devices/{device_id}")
+def api_get_device(device_id: str):
+    """查询指定设备详情。"""
+    record = get_device(device_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"未找到设备 {device_id}")
+    return record
+
+
+@app.post("/api/devices")
+def api_upsert_device(req: DeviceRequest):
+    """新增或更新设备信息（upsert）。"""
+    upsert_device(req.device_id, req.store_id, req.device_type, req.brand, req.model,
+                   req.purchase_date, req.warranty_until, req.status)
+    return {"ok": True, "device_id": req.device_id, "store_id": req.store_id, "device_type": req.device_type}
+
+
+# ---------------- 员工管理 ----------------
+@app.get("/api/staff")
+def api_list_staff(role: Optional[str] = None, store_id: Optional[str] = None, limit: int = 100):
+    """员工列表（可按角色/门店过滤）。"""
+    return list_staff(role=role, store_id=store_id, limit=min(limit, 500))
+
+
+@app.get("/api/staff/{staff_id}")
+def api_get_staff(staff_id: str):
+    """查询指定员工详情。"""
+    record = get_staff(staff_id)
+    if not record:
+        raise HTTPException(status_code=404, detail=f"未找到员工 {staff_id}")
+    return record
+
+
+@app.post("/api/staff")
+def api_upsert_staff(req: StaffRequest):
+    """新增或更新员工信息（upsert）。"""
+    upsert_staff(req.staff_id, req.name, req.role, req.phone, req.store_id, req.status)
+    return {"ok": True, "staff_id": req.staff_id, "name": req.name, "role": req.role}
