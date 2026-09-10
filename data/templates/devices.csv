@@ -1,0 +1,4 @@
+﻿device_id,store_id,device_type,brand,model,purchase_date,warranty_until,status
+D0001,S001,收银机,品牌A,型号X1,2025-01-15,2028-01-14,正常
+D0002,S001,制冰机,品牌B,型号Y2,2025-03-20,2027-03-19,正常
+D0003,S002,冷藏冰箱,品牌C,型号Z3,2024-06-10,2026-06-09,故障
