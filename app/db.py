@@ -3,6 +3,11 @@
 表：
 - repair_orders  报修工单
 - chat_logs      会话日志（含意图/耗时/是否转人工）
+- inventory      门店物料库存（支持 ERP 同步）
+- promotions     促销政策（动态管理，支持有效期）
+- stores         门店主数据（200+ 直营门店）
+- devices        设备清单（按门店管理）
+- staff          员工/维修工信息
 
 MySQL 不可用时自动落 SQLite（data/app.db），保证零配置演示。
 测试可通过环境变量 DB_PATH 覆盖数据库文件（避免与运行中的服务抢锁）。
@@ -57,6 +62,36 @@ def init_db() -> None:
         query TEXT, intent VARCHAR(32), answer TEXT, handoff TINYINT,
         latency_ms INT, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
     ) DEFAULT CHARSET=utf8mb4;
+    CREATE TABLE IF NOT EXISTS inventory (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        store_id VARCHAR(16), material VARCHAR(64), stock INT, unit VARCHAR(16),
+        reorder_point INT, updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        UNIQUE KEY uk_store_material (store_id, material)
+    ) DEFAULT CHARSET=utf8mb4;
+    CREATE TABLE IF NOT EXISTS promotions (
+        promo_code VARCHAR(16) PRIMARY KEY,
+        name VARCHAR(128), rule TEXT, status VARCHAR(16),
+        valid_from DATE, valid_until DATE, created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) DEFAULT CHARSET=utf8mb4;
+    CREATE TABLE IF NOT EXISTS stores (
+        store_id VARCHAR(16) PRIMARY KEY,
+        name VARCHAR(128), address VARCHAR(256), phone VARCHAR(32),
+        manager VARCHAR(64), status VARCHAR(16) DEFAULT '营业中',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) DEFAULT CHARSET=utf8mb4;
+    CREATE TABLE IF NOT EXISTS devices (
+        id BIGINT AUTO_INCREMENT PRIMARY KEY,
+        device_id VARCHAR(32), store_id VARCHAR(16), device_type VARCHAR(64),
+        brand VARCHAR(64), model VARCHAR(64), purchase_date DATE,
+        warranty_until DATE, status VARCHAR(16) DEFAULT '正常',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) DEFAULT CHARSET=utf8mb4;
+    CREATE TABLE IF NOT EXISTS staff (
+        staff_id VARCHAR(32) PRIMARY KEY,
+        name VARCHAR(64), role VARCHAR(32), phone VARCHAR(32),
+        store_id VARCHAR(16), status VARCHAR(16) DEFAULT '在职',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    ) DEFAULT CHARSET=utf8mb4;
     """
     sqlite_sql = """
     CREATE TABLE IF NOT EXISTS repair_orders (
@@ -68,6 +103,36 @@ def init_db() -> None:
         session_id TEXT, user_id TEXT, store_id TEXT,
         query TEXT, intent TEXT, answer TEXT, handoff INTEGER,
         latency_ms INTEGER, created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS inventory (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        store_id TEXT, material TEXT, stock INTEGER, unit TEXT,
+        reorder_point INTEGER, updated_at TEXT DEFAULT (datetime('now','localtime')),
+        UNIQUE(store_id, material)
+    );
+    CREATE TABLE IF NOT EXISTS promotions (
+        promo_code TEXT PRIMARY KEY,
+        name TEXT, rule TEXT, status TEXT,
+        valid_from TEXT, valid_until TEXT, created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS stores (
+        store_id TEXT PRIMARY KEY,
+        name TEXT, address TEXT, phone TEXT,
+        manager TEXT, status TEXT DEFAULT '营业中',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS devices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        device_id TEXT, store_id TEXT, device_type TEXT,
+        brand TEXT, model TEXT, purchase_date TEXT,
+        warranty_until TEXT, status TEXT DEFAULT '正常',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
+    );
+    CREATE TABLE IF NOT EXISTS staff (
+        staff_id TEXT PRIMARY KEY,
+        name TEXT, role TEXT, phone TEXT,
+        store_id TEXT, status TEXT DEFAULT '在职',
+        created_at TEXT DEFAULT (datetime('now','localtime'))
     );
     """
     with _lock:
@@ -279,3 +344,242 @@ def update_repair_status(order_no: str, status: str, actor: str = "", confirm: b
     conn.commit()
     updated = get_repair(order_no)
     return True, f"工单 {order_no} 已更新为「{status}」", updated
+
+
+# ---------------- 通用 CRUD 辅助 ----------------
+def _execute(sql: str, params: tuple = (), fetch: str = "none"):
+    """统一执行 SQL，自动适配 MySQL/SQLite。fetch: none/one/all"""
+    if _backend == "mysql":
+        try:
+            c = _get_mysql()
+            with c.cursor() as cur:
+                cur.execute(sql, params)
+                if fetch == "one":
+                    row = cur.fetchone()
+                elif fetch == "all":
+                    row = cur.fetchall()
+                else:
+                    row = None
+                    c.commit()
+            c.close()
+            return row
+        except Exception as e:
+            print(f"[db mysql error] {e}")
+            return None
+    conn = _get_sqlite()
+    cur = conn.execute(sql, params)
+    if fetch == "one":
+        row = cur.fetchone()
+        return dict(row) if row else None
+    elif fetch == "all":
+        return [dict(r) for r in cur.fetchall()]
+    conn.commit()
+    return None
+
+
+# ---------------- inventory 物料库存 ----------------
+def get_inventory(store_id: str, material: str) -> Optional[dict]:
+    return _execute(
+        "SELECT * FROM inventory WHERE store_id=%s AND material=%s" if _backend == "mysql"
+        else "SELECT * FROM inventory WHERE store_id=? AND material=?",
+        (store_id, material), fetch="one")
+
+
+def list_inventory(store_id: Optional[str] = None, limit: int = 100) -> list:
+    if store_id:
+        return _execute(
+            "SELECT * FROM inventory WHERE store_id=%s ORDER BY material LIMIT %s" if _backend == "mysql"
+            else "SELECT * FROM inventory WHERE store_id=? ORDER BY material LIMIT ?",
+            (store_id, limit), fetch="all") or []
+    return _execute(
+        "SELECT * FROM inventory ORDER BY store_id, material LIMIT %s" if _backend == "mysql"
+        else "SELECT * FROM inventory ORDER BY store_id, material LIMIT ?",
+        (limit,), fetch="all") or []
+
+
+def upsert_inventory(store_id: str, material: str, stock: int, unit: str = "个", reorder_point: int = 0) -> None:
+    if _backend == "mysql":
+        _execute(
+            "INSERT INTO inventory (store_id, material, stock, unit, reorder_point) VALUES (%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE stock=%s, unit=%s, reorder_point=%s",
+            (store_id, material, stock, unit, reorder_point, stock, unit, reorder_point))
+    else:
+        existing = get_inventory(store_id, material)
+        if existing:
+            _execute("UPDATE inventory SET stock=?, unit=?, reorder_point=? WHERE store_id=? AND material=?",
+                     (stock, unit, reorder_point, store_id, material))
+        else:
+            _execute("INSERT INTO inventory (store_id, material, stock, unit, reorder_point) VALUES (?,?,?,?,?)",
+                     (store_id, material, stock, unit, reorder_point))
+
+
+def update_inventory_stock(store_id: str, material: str, delta: int) -> Optional[dict]:
+    """库存增减（delta 正为入库，负为出库），返回更新后记录。"""
+    record = get_inventory(store_id, material)
+    if not record:
+        return None
+    new_stock = max(0, int(record["stock"]) + delta)
+    if _backend == "mysql":
+        _execute("UPDATE inventory SET stock=%s WHERE store_id=%s AND material=%s",
+                 (new_stock, store_id, material))
+    else:
+        _execute("UPDATE inventory SET stock=? WHERE store_id=? AND material=?",
+                 (new_stock, store_id, material))
+    return get_inventory(store_id, material)
+
+
+# ---------------- promotions 促销政策 ----------------
+def get_promotion(promo_code: str) -> Optional[dict]:
+    return _execute(
+        "SELECT * FROM promotions WHERE promo_code=%s" if _backend == "mysql"
+        else "SELECT * FROM promotions WHERE promo_code=?",
+        (promo_code,), fetch="one")
+
+
+def list_promotions(status: Optional[str] = None, limit: int = 50) -> list:
+    if status:
+        return _execute(
+            "SELECT * FROM promotions WHERE status=%s ORDER BY valid_until DESC LIMIT %s" if _backend == "mysql"
+            else "SELECT * FROM promotions WHERE status=? ORDER BY valid_until DESC LIMIT ?",
+            (status, limit), fetch="all") or []
+    return _execute(
+        "SELECT * FROM promotions ORDER BY valid_until DESC LIMIT %s" if _backend == "mysql"
+        else "SELECT * FROM promotions ORDER BY valid_until DESC LIMIT ?",
+        (limit,), fetch="all") or []
+
+
+def upsert_promotion(promo_code: str, name: str, rule: str, status: str = "生效中",
+                     valid_from: str = "", valid_until: str = "") -> None:
+    if _backend == "mysql":
+        _execute(
+            "INSERT INTO promotions (promo_code, name, rule, status, valid_from, valid_until) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE name=%s, rule=%s, status=%s, valid_from=%s, valid_until=%s",
+            (promo_code, name, rule, status, valid_from, valid_until,
+             name, rule, status, valid_from, valid_until))
+    else:
+        existing = get_promotion(promo_code)
+        if existing:
+            _execute("UPDATE promotions SET name=?, rule=?, status=?, valid_from=?, valid_until=? WHERE promo_code=?",
+                     (name, rule, status, valid_from, valid_until, promo_code))
+        else:
+            _execute("INSERT INTO promotions (promo_code, name, rule, status, valid_from, valid_until) VALUES (?,?,?,?,?,?)",
+                     (promo_code, name, rule, status, valid_from, valid_until))
+
+
+# ---------------- stores 门店主数据 ----------------
+def get_store(store_id: str) -> Optional[dict]:
+    return _execute(
+        "SELECT * FROM stores WHERE store_id=%s" if _backend == "mysql"
+        else "SELECT * FROM stores WHERE store_id=?",
+        (store_id,), fetch="one")
+
+
+def list_stores(status: Optional[str] = None, limit: int = 200) -> list:
+    if status:
+        return _execute(
+            "SELECT * FROM stores WHERE status=%s ORDER BY store_id LIMIT %s" if _backend == "mysql"
+            else "SELECT * FROM stores WHERE status=? ORDER BY store_id LIMIT ?",
+            (status, limit), fetch="all") or []
+    return _execute(
+        "SELECT * FROM stores ORDER BY store_id LIMIT %s" if _backend == "mysql"
+        else "SELECT * FROM stores ORDER BY store_id LIMIT ?",
+        (limit,), fetch="all") or []
+
+
+def upsert_store(store_id: str, name: str = "", address: str = "", phone: str = "",
+                 manager: str = "", status: str = "营业中") -> None:
+    if _backend == "mysql":
+        _execute(
+            "INSERT INTO stores (store_id, name, address, phone, manager, status) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE name=%s, address=%s, phone=%s, manager=%s, status=%s",
+            (store_id, name, address, phone, manager, status,
+             name, address, phone, manager, status))
+    else:
+        existing = get_store(store_id)
+        if existing:
+            _execute("UPDATE stores SET name=?, address=?, phone=?, manager=?, status=? WHERE store_id=?",
+                     (name, address, phone, manager, status, store_id))
+        else:
+            _execute("INSERT INTO stores (store_id, name, address, phone, manager, status) VALUES (?,?,?,?,?,?)",
+                     (store_id, name, address, phone, manager, status))
+
+
+# ---------------- devices 设备清单 ----------------
+def get_device(device_id: str) -> Optional[dict]:
+    return _execute(
+        "SELECT * FROM devices WHERE device_id=%s" if _backend == "mysql"
+        else "SELECT * FROM devices WHERE device_id=?",
+        (device_id,), fetch="one")
+
+
+def list_devices(store_id: Optional[str] = None, limit: int = 100) -> list:
+    if store_id:
+        return _execute(
+            "SELECT * FROM devices WHERE store_id=%s ORDER BY device_type LIMIT %s" if _backend == "mysql"
+            else "SELECT * FROM devices WHERE store_id=? ORDER BY device_type LIMIT ?",
+            (store_id, limit), fetch="all") or []
+    return _execute(
+        "SELECT * FROM devices ORDER BY store_id, device_type LIMIT %s" if _backend == "mysql"
+        else "SELECT * FROM devices ORDER BY store_id, device_type LIMIT ?",
+        (limit,), fetch="all") or []
+
+
+def upsert_device(device_id: str, store_id: str, device_type: str, brand: str = "",
+                  model: str = "", purchase_date: str = "", warranty_until: str = "",
+                  status: str = "正常") -> None:
+    if _backend == "mysql":
+        _execute(
+            "INSERT INTO devices (device_id, store_id, device_type, brand, model, purchase_date, warranty_until, status) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE store_id=%s, device_type=%s, brand=%s, model=%s, "
+            "purchase_date=%s, warranty_until=%s, status=%s",
+            (device_id, store_id, device_type, brand, model, purchase_date, warranty_until, status,
+             store_id, device_type, brand, model, purchase_date, warranty_until, status))
+    else:
+        existing = get_device(device_id)
+        if existing:
+            _execute("UPDATE devices SET store_id=?, device_type=?, brand=?, model=?, purchase_date=?, warranty_until=?, status=? WHERE device_id=?",
+                     (store_id, device_type, brand, model, purchase_date, warranty_until, status, device_id))
+        else:
+            _execute("INSERT INTO devices (device_id, store_id, device_type, brand, model, purchase_date, warranty_until, status) VALUES (?,?,?,?,?,?,?,?)",
+                     (device_id, store_id, device_type, brand, model, purchase_date, warranty_until, status))
+
+
+# ---------------- staff 员工信息 ----------------
+def get_staff(staff_id: str) -> Optional[dict]:
+    return _execute(
+        "SELECT * FROM staff WHERE staff_id=%s" if _backend == "mysql"
+        else "SELECT * FROM staff WHERE staff_id=?",
+        (staff_id,), fetch="one")
+
+
+def list_staff(role: Optional[str] = None, store_id: Optional[str] = None, limit: int = 100) -> list:
+    sql = "SELECT * FROM staff WHERE 1=1"
+    params = []
+    if role:
+        sql += " AND role=%s" if _backend == "mysql" else " AND role=?"
+        params.append(role)
+    if store_id:
+        sql += " AND store_id=%s" if _backend == "mysql" else " AND store_id=?"
+        params.append(store_id)
+    sql += " ORDER BY name LIMIT %s" if _backend == "mysql" else " ORDER BY name LIMIT ?"
+    params.append(limit)
+    return _execute(sql, tuple(params), fetch="all") or []
+
+
+def upsert_staff(staff_id: str, name: str, role: str = "店员", phone: str = "",
+                 store_id: str = "", status: str = "在职") -> None:
+    if _backend == "mysql":
+        _execute(
+            "INSERT INTO staff (staff_id, name, role, phone, store_id, status) VALUES (%s,%s,%s,%s,%s,%s) "
+            "ON DUPLICATE KEY UPDATE name=%s, role=%s, phone=%s, store_id=%s, status=%s",
+            (staff_id, name, role, phone, store_id, status,
+             name, role, phone, store_id, status))
+    else:
+        existing = get_staff(staff_id)
+        if existing:
+            _execute("UPDATE staff SET name=?, role=?, phone=?, store_id=?, status=? WHERE staff_id=?",
+                     (name, role, phone, store_id, status, staff_id))
+        else:
+            _execute("INSERT INTO staff (staff_id, name, role, phone, store_id, status) VALUES (?,?,?,?,?,?)",
+                     (staff_id, name, role, phone, store_id, status))
