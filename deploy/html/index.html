@@ -7,7 +7,10 @@
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; height:100vh; display:flex; flex-direction:column; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; height:100vh; display:flex; flex-direction:column; position:relative; }
+  /* 水印层 */
+  #watermark { position:fixed; top:0; left:0; width:100%; height:100%; z-index:0; pointer-events:none; overflow:hidden; }
+  #watermark .wm-item { position:absolute; color:#4a90d9; font-size:28px; font-weight:700; opacity:0.1; white-space:nowrap; user-select:none; letter-spacing:3px; }
   .header { background:#4a90d9; color:#fff; padding:12px 16px; font-size:16px; font-weight:600; text-align:center; }
   .tabs { display:flex; background:#fff; border-bottom:1px solid #eee; }
   .tab { flex:1; padding:12px; text-align:center; font-size:14px; cursor:pointer; color:#666; border-bottom:2px solid transparent; }
@@ -109,6 +112,7 @@
 </style>
 </head>
 <body>
+  <div id="watermark"></div>
   <div class="header">🏪 门店运营智能助手</div>
   <div class="tabs">
     <div class="tab active" onclick="switchTab('chat')">💬 对话</div>
@@ -250,12 +254,15 @@ marked.setOptions({ breaks: true, gfm: true });
 const DEFAULT_STORES = ['S001', 'S002', 'S003', 'S008', 'S009', 'S010'];
 
 async function loadStores() {
-  let stores = DEFAULT_STORES;
+  let stores = DEFAULT_STORES.map(s => ({store_id: s, name: s}));
   try {
     const res = await fetch('/api/stores');
     const data = await res.json();
     if (Array.isArray(data) && data.length > 0) {
-      stores = data.map(s => s.store_id || s.id || s).filter(Boolean);
+      stores = data.map(s => ({
+        store_id: s.store_id || s.id || s,
+        name: s.name || s.store_id || s
+      })).filter(s => s.store_id);
     }
   } catch (e) {
     console.log('门店列表获取失败，使用默认门店');
@@ -263,10 +270,10 @@ async function loadStores() {
   // 填充3个下拉框
   ['chatStore', 'repairStore'].forEach(id => {
     const sel = document.getElementById(id);
-    sel.innerHTML = stores.map(s => `<option value="${s}">${s}</option>`).join('');
+    sel.innerHTML = stores.map(s => `<option value="${s.store_id}">${s.name}</option>`).join('');
   });
   const filterSel = document.getElementById('filterStore');
-  filterSel.innerHTML = '<option value="">全部门店</option>' + stores.map(s => `<option value="${s}">${s}</option>`).join('');
+  filterSel.innerHTML = '<option value="">全部门店</option>' + stores.map(s => `<option value="${s.store_id}">${s.name}</option>`).join('');
 }
 
 // ========== Tab 切换 ==========
@@ -675,9 +682,47 @@ async function loadMetrics() {
   }
 }
 
+// 生成水印（雪花式稀疏排列）
+function initWatermark() {
+  const container = document.getElementById('watermark');
+  if (!container) return;
+  container.innerHTML = '';
+  const text = 'M9T';
+  const gapX = 320;  // 横向基础间距
+  const gapY = 240;  // 纵向基础间距
+  const cols = Math.ceil(window.innerWidth / gapX) + 2;
+  const rows = Math.ceil(window.innerHeight / gapY) + 2;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const item = document.createElement('div');
+      item.className = 'wm-item';
+      item.textContent = text;
+      // 随机偏移（雪花效果）
+      const offsetX = (Math.random() - 0.5) * 120;
+      const offsetY = (Math.random() - 0.5) * 80;
+      item.style.left = (c * gapX + offsetX) + 'px';
+      item.style.top = (r * gapY + offsetY) + 'px';
+      // 随机旋转角度（-25° ~ -35°）
+      const rotate = -30 + (Math.random() - 0.5) * 10;
+      // 随机透明度（0.08 ~ 0.12）
+      const opacity = 0.08 + Math.random() * 0.04;
+      item.style.transform = `rotate(${rotate}deg)`;
+      item.style.opacity = opacity;
+      container.appendChild(item);
+    }
+  }
+}
+
 // 页面加载时初始化
+initWatermark();
 loadStores();
 loadHealth();
+
+// 窗口大小变化时重新生成水印
+window.addEventListener('resize', () => {
+  clearTimeout(window._wmTimer);
+  window._wmTimer = setTimeout(initWatermark, 300);
+});
 
 // 告警页每30秒自动刷新
 setInterval(() => {
