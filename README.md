@@ -23,212 +23,6 @@
 | 📱 网页前端 | 三标签页（对话/报修/告警），响应式设计，手机浏览器直接用 |
 | 🏢 企业微信 | 群机器人主动推送 + 回调被动回复，维修工群内指令推进工单状态 |
 
-## 👥 角色分工（谁用这个系统？做什么？）
-
-系统设计为**多角色协作**，不同角色看到的界面和能做的操作不同。
-
-### 角色总览
-
-| 角色 | 日常操作 | 使用界面 | 技术要求 |
-|---|---|---|---|
-| 👤 **店员/店长** | 提问、报修、查库存、查促销 | 网页前端 / 企业微信 | 零技术，会打字就行 |
-| 🔧 **维修工** | 接单、推进工单状态、查看报修详情 | 企业微信群 / 网页前端 | 零技术 |
-| 📊 **运营人员** | 维护主数据、更新 SOP 文档、管理促销活动 | Excel + 命令行脚本 / API | 会用 Excel，会敲命令 |
-| ⚙️ **开发者/运维** | 部署服务、导入数据、配置定时任务、排查问题 | 命令行 / Docker / 代码 | 需要技术背景 |
-| 🔐 **系统管理员** | 配置密钥、管理权限、监控告警 | `.env` 配置 / 监控面板 | 需要技术背景 |
-
----
-
-### 👤 店员/店长（最主要使用者）
-
-**做什么：**
-- 自然语言提问查 SOP（"制冰机不出冰怎么办"）
-- 查物料库存（"可乐杯还有多少"）
-- 核对促销规则（"P01 满100减20还能用吗"）
-- 设备报修（"收银机死机了，帮我报修"）
-- 转人工投诉（"我要找经理投诉"）
-
-**用什么：**
-- 网页前端：`http://服务器IP`（三标签页：对话/报修/告警）
-- 企业微信群：直接 @机器人 或发消息
-
-**不做什么：**
-- ❌ 不需要懂技术、不需要碰命令行
-- ❌ 不需要知道数据存在哪、怎么更新
-- ❌ 不需要配置任何东西
-
-**典型对话示例：**
-```
-店长：可乐杯还有多少库存？
-助手：门店 S001 可乐杯当前库存 1200 个，补货线 500，库存充足。
-
-店长：收银机死机了，帮我报修
-助手：报修工单已受理：单号 RX12345678，设备收银机，24小时内响应...
-```
-
----
-
-### 🔧 维修工
-
-**做什么：**
-- 接收企微群报修推送
-- 接单并推进工单状态（已派单→维修中→已解决）
-- 查看工单详情（门店、设备、故障描述）
-
-**用什么：**
-- 企业微信群（收到推送 → 回复指令推进状态）
-- 网页前端报修标签页（可视化操作）
-
-**不做什么：**
-- ❌ 不需要创建工单（店长创建）
-- ❌ 不能关闭工单（需要店长确认）
-
-**典型操作：**
-```
-企微群收到推送：🔧 新报修工单 RX12345678｜门店 S001｜设备 收银机
-
-维修工回复：RX12345678 已派单
-系统：工单已更新为「已派单」
-
-维修工回复：RX12345678 维修中
-系统：工单已更新为「维修中」
-
-维修工回复：RX12345678 已解决
-系统：工单已更新为「已解决」，等待店长确认关闭
-```
-
----
-
-### 📊 运营人员
-
-**做什么：**
-- 维护门店/设备/员工/促销/库存主数据（Excel 批量导入）
-- 更新 SOP 运营文档（Markdown）
-- 管理促销活动（上线/下架）
-- 查看运营数据（对话日志、工单统计）
-
-**用什么：**
-- Excel（编辑 `data/templates/` 下的 CSV 模板）
-- 命令行脚本（`python scripts/import_*.py`）
-- REST API（对接管理后台）
-
-**不做什么：**
-- ❌ 不需要写代码（脚本已经写好了）
-- ❌ 不需要部署服务（运维做）
-
-**典型操作：**
-```bash
-# 1. 用 Excel 打开 data/templates/stores.csv，新增一家门店
-# 2. 保存为 CSV（UTF-8）
-# 3. 运行导入
-python scripts/import_stores.py data/templates/stores.csv
-
-# 4. 更新 SOP 文档
-# 编辑 data/raw_docs/ 下的 Markdown 文件
-python scripts/build_index.py  # 重建向量索引
-```
-
----
-
-### ⚙️ 开发者/运维
-
-**做什么：**
-- 部署服务（Docker / 本地）
-- 初始化数据库和主数据
-- 配置定时任务（库存同步、促销过期检查）
-- 排查问题（查看日志、健康检查）
-- 二次开发（扩展功能、对接外部系统）
-
-**用什么：**
-- 命令行（Linux / Windows）
-- Docker / Docker Compose
-- 代码编辑器（Python）
-
-**典型操作：**
-```bash
-# 部署
-cd deploy
-docker compose -f docker-compose.lite.yml up -d --build
-
-# 健康检查
-curl http://127.0.0.1:8000/healthz
-
-# 查看日志
-docker compose -f docker-compose.lite.yml logs app --tail 50
-
-# 配置定时任务
-crontab -e
-*/10 * * * * python scripts/sync_inventory.py
-0 2 * * * python scripts/check_promotions.py
-```
-
----
-
-### 🔐 系统管理员
-
-**做什么：**
-- 配置 API Key（LLM、Embedding）
-- 配置 Webhook（飞书告警、企微推送）
-- 配置数据库连接（MySQL、Redis）
-- 监控系统健康状态
-- 管理告警阈值
-
-**用什么：**
-- `.env` 配置文件
-- 监控面板（Prometheus 指标）
-- 飞书/企微后台（机器人配置）
-
-**典型配置：**
-```bash
-# .env 文件
-LLM_API_KEY=sk-xxx          # DeepSeek API Key
-EMBED_API_KEY=sk-xxx        # 硅基流动 Embedding Key
-WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx
-FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx
-MYSQL_HOST=mysql
-MYSQL_USER=root
-MYSQL_PASSWORD=xxx
-```
-
----
-
-### 角色协作流程图
-
-```
-店员/店长提问/报修
-        │
-        ▼
-   Agent 自动处理
-   ├─ 查 SOP → 直接回答
-   ├─ 查库存 → 查 inventory 表
-   ├─ 查促销 → 查 promotions 表
-   └─ 报修 → 创建工单 + 推企微群
-        │
-        ▼
-   维修工（企微群接单）
-        │
-        ▼
-   工单状态流转（已派单→维修中→已解决）
-        │
-        ▼
-   店长确认关闭工单
-```
-
-### 数据维护责任表
-
-| 数据类型 | 谁来维护 | 怎么维护 | 频率 |
-|---|---|---|---|
-| 知识库/SOP | 运营人员 | 改 Markdown → 重建索引 | 政策变更时 |
-| 物料库存 | 系统自动 + 运营 | ERP 定时同步 + 手动修正 | 每 10 分钟 |
-| 促销政策 | 运营人员 | CSV 导入 / API | 活动上线时 |
-| 门店信息 | 运营人员 | CSV 导入 / API | 开店/闭店时 |
-| 设备信息 | 运营人员 | CSV 导入 / API | 采购/报废时 |
-| 员工信息 | 运营人员 | CSV 导入 / API | 入职/离职时 |
-| 报修工单 | 系统自动 | 状态机自动流转 | 实时 |
-| 配置/密钥 | 系统管理员 | 改 `.env` → 重启 | 密钥轮换时 |
-
----
-
 ## 🏗️ 技术架构
 
 ```
@@ -248,101 +42,54 @@ FastAPI（REST + SSE 流式）
 外部：DeepSeek LLM + 硅基流动 Embedding + 飞书/企微 Webhook
 ```
 
+## 📊 性能指标
+
+- **召回率@3**：98.75%（120 条评测集，离线哈希向量模式）
+- **意图准确率**：100%
+- **任务完成率**：100%
+- **幻觉率**：0%
+- **单元测试**：47 passed（33 核心 + 14 主数据管理）
+- **工单状态机**：5 状态流转，不可跳级/回退，关闭需店长确认
+
+## 📝 工单闭环流程
+
+```
+店长报修（对话/表单）
+    ↓
+工单创建（已受理）→ 企微维修群推送
+    ↓
+维修工派单（已派单）→ 企微群推送（含故障描述）
+    ↓
+维修工接单（维修中）
+    ↓
+维修完成（已解决）
+    ↓
+店长确认（已关闭）
+```
+
+维修工可在企微群内回复「RX单号 已派单/维修中/已解决」自动推进状态，或在网页前端操作。
+
 ## 🔄 数据流全景（来源 → 存储 → 出口）
-
-理解系统的核心是理解数据从哪里来、存在哪里、到哪里去。
-
-### 全景图
-
-```
-                         ┌─────────────────────────────────────────┐
-                         │              数据来源（输入）              │
-                         ├─────────────────────────────────────────┤
-                         │  CSV/Excel 模板  │  店长/店员对话  │  维修工指令  │
-                         │  (data/templates/)│  (网页/企微)     │  (企微群)    │
-                         │  ERP/POS API(可选)│  运营手动录入    │  定时任务     │
-                         └─────────┬────────────────┬──────────────┘
-                                   │                │
-                                   ▼                ▼
-                         ┌─────────────────────────────────────────┐
-                         │              数据存储（持久化）            │
-                         ├─────────────────────────────────────────┤
-                         │  MySQL（7张表）      │  Redis（会话缓存） │
-                         │  ├─ repair_orders    │  └─ 会话状态      │
-                         │  ├─ chat_logs        │                   │
-                         │  ├─ inventory        │  文件存储          │
-                         │  ├─ promotions       │  ├─ data/raw_docs/│
-                         │  ├─ stores           │  ├─ data/index.json│
-                         │  ├─ devices          │  └─ deploy/.env   │
-                         │  └─ staff            │     (配置/密钥)    │
-                         └─────────┬────────────────┬──────────────┘
-                                   │                │
-                                   ▼                ▼
-                         ┌─────────────────────────────────────────┐
-                         │              数据出口（消费）              │
-                         ├─────────────────────────────────────────┤
-                         │  智能对话回答  │  网页前端展示  │  API 接口  │
-                         │  (Agent+RAG)  │  (对话/报修/告警)│  (REST)   │
-                         │                │                │           │
-                         │  企微群推送    │  飞书告警推送  │  Prometheus│
-                         │  (工单/派单)   │  (错误率/延迟) │  指标      │
-                         └─────────────────────────────────────────┘
-```
 
 ### 7 类业务数据的完整生命周期
 
-| 数据类型 | 来源（输入） | 存储位置 | 出口（消费） | 更新方式 | 更新频率 |
-|---|---|---|---|---|---|
-| **报修工单** | 店长对话报修 / 网页表单 / API | MySQL `repair_orders` | 企微群推送 / 网页工单列表 / API | 系统自动流转（状态机） | 实时 |
-| **物料库存** | CSV导入 / ERP同步 / 手动调整 / API | MySQL `inventory` | 对话查询回答 / API / 补货提醒 | 定时同步脚本 + CSV + API | 每10分钟（定时） |
-| **促销政策** | CSV导入 / API手动录入 | MySQL `promotions` | 对话校验回答 / API / 前端展示 | CSV + API + 每天自动过期检查 | 活动上线时 |
-| **门店信息** | CSV导入 / API手动录入 | MySQL `stores` | 对话门店校验 / API / 前端展示 | CSV + API | 开店/闭店时 |
-| **设备信息** | CSV导入 / API手动录入 | MySQL `devices` | 报修设备校验 / API / 前端展示 | CSV + API | 采购/报废时 |
-| **员工信息** | CSV导入 / API手动录入 | MySQL `staff` | API / 接单人识别（可选扩展） | CSV + API | 入职/离职时 |
-| **知识库/SOP** | Markdown文档（`data/raw_docs/`） | `data/index.json`（向量索引） | RAG检索回答 / 对话上下文 | 改文档 → 重建索引 → 重启 | 政策变更时 |
+| 数据类型 | 来源（输入） | 存储位置 | 出口（消费） | 更新方式 |
+|---|---|---|---|---|
+| **报修工单** | 店长对话报修 / 网页表单 / API | MySQL `repair_orders` | 企微群推送 / 网页工单列表 / API | 系统自动流转（状态机） |
+| **物料库存** | CSV导入 / ERP同步 / 手动调整 / API | MySQL `inventory` | 对话查询回答 / API / 补货提醒 | 定时同步脚本 + CSV + API |
+| **促销政策** | CSV导入 / API手动录入 | MySQL `promotions` | 对话校验回答 / API / 前端展示 | CSV + API + 每天自动过期检查 |
+| **门店信息** | CSV导入 / API手动录入 | MySQL `stores` | 对话门店校验 / API / 前端展示 | CSV + API |
+| **设备信息** | CSV导入 / API手动录入 | MySQL `devices` | 报修设备校验 / API / 前端展示 | CSV + API |
+| **员工信息** | CSV导入 / API手动录入 | MySQL `staff` | API / 接单人识别（可选扩展） | CSV + API |
+| **知识库/SOP** | Markdown文档（`data/raw_docs/`） | `data/index.json`（向量索引） | RAG检索回答 / 对话上下文 | 改文档 → 重建索引 → 重启 |
 
 ### 3 类系统数据（自动管理，无需手动）
 
-| 数据类型 | 来源 | 存储位置 | 出口 | 更新方式 |
-|---|---|---|---|---|
-| **对话日志** | 每次对话自动记录 | MySQL `chat_logs` | API查询 / 运营分析 | 系统自动 |
-| **会话缓存** | 对话过程中自动生成 | Redis（连不上降级内存） | Agent状态机读取 | 系统自动（过期自动清理） |
-| **配置/密钥** | 手动编辑 `.env` | `deploy/.env` | 所有模块启动时读取 | 改 `.env` → 重启服务 |
-
-### 数据导入流程（从零到可用）
-
-> ⚠️ **以下是开发者/运维视角的操作**，店员/店长不需要做这些，直接用网页前端或企微对话即可。
-
-```
-第1步：准备数据
-    │
-    ├─ 用 Excel 打开 data/templates/ 下的 CSV 模板
-    ├─ 填写门店/设备/员工/促销/库存数据
-    └─ 另存为 CSV（UTF-8 编码）
-    │
-第2步：批量导入
-    │
-    ├─ python scripts/import_stores.py data/templates/stores.csv
-    ├─ python scripts/import_devices.py data/templates/devices.csv
-    ├─ python scripts/import_staff.py data/templates/staff.csv
-    ├─ python scripts/import_promotions.py data/templates/promotions.csv
-    └─ python scripts/sync_inventory.py --import data/templates/inventory.csv
-    │
-第3步：知识库导入
-    │
-    ├─ 编辑 data/raw_docs/ 下的 Markdown 文档
-    └─ python scripts/build_index.py（重建向量索引）
-    │
-第4步：启动服务
-    │
-    └─ uvicorn app.main:app --port 8000
-    │
-第5步：验证
-    │
-    ├─ curl http://127.0.0.1:8000/healthz
-    ├─ curl http://127.0.0.1:8000/api/stores
-    └─ 网页前端 http://127.0.0.1:8000 对话测试
-```
+| 数据类型 | 存储位置 | 更新方式 |
+|---|---|---|
+| **对话日志** | MySQL `chat_logs` | 系统自动记录 |
+| **会话缓存** | Redis（连不上降级内存） | 系统自动（过期自动清理） |
+| **配置/密钥** | `deploy/.env` | 改 `.env` → 重启服务 |
 
 ### 数据消费方式（3 种出口）
 
@@ -352,14 +99,56 @@ FastAPI（REST + SSE 流式）
 | **网页前端** | 三标签页（对话/报修/告警），可视化展示数据 | 报修工单列表、库存状态、告警指标 |
 | **REST API** | 标准 HTTP 接口，可对接管理后台、移动端、第三方系统 | `GET /api/repairs`、`POST /api/inventory` |
 
-### 外部推送（2 种主动出口）
+## 👥 角色分工
 
-| 推送方式 | 触发条件 | 推送内容 |
-|---|---|---|
-| **企业微信群** | 新报修工单 / 工单派单 | 工单详情、门店、设备、故障描述 |
-| **飞书群** | 错误率≥5% / P95延迟≥3秒 | 告警详情、时间窗口、指标数值 |
+| 角色 | 日常操作 | 使用界面 | 技术要求 |
+|---|---|---|---|
+| 👤 **店员/店长** | 提问、报修、查库存、查促销 | 网页前端 / 企业微信 | 零技术，会打字就行 |
+| 🔧 **维修工** | 接单、推进工单状态、查看报修详情 | 企业微信群 / 网页前端 | 零技术 |
+| 📊 **运营人员** | 维护主数据、更新 SOP 文档、管理促销活动 | Excel + 命令行脚本 / API | 会用 Excel，会敲命令 |
+| ⚙️ **开发者/运维** | 部署服务、导入数据、配置定时任务、排查问题 | 命令行 / Docker / 代码 | 需要技术背景 |
+| 🔐 **系统管理员** | 配置密钥、管理权限、监控告警 | `.env` 配置 / 监控面板 | 需要技术背景 |
 
----
+### 数据维护责任表
+
+| 数据类型 | 谁来维护 | 怎么维护 | 频率 |
+|---|---|---|---|
+| 知识库/SOP | 运营人员 | 改 Markdown → 重建索引 | 政策变更时 |
+| 物料库存 | 系统自动 + 运营 | ERP 定时同步 + 手动修正 | 每 10 分钟 |
+| 促销政策 | 运营人员 | CSV 导入 / API | 活动上线时 |
+| 门店信息 | 运营人员 | CSV 导入 / API | 开店/闭店时 |
+| 设备信息 | 运营人员 | CSV 导入 / API | 采购/报废时 |
+| 员工信息 | 运营人员 | CSV 导入 / API | 入职/离职时 |
+| 报修工单 | 系统自动 | 状态机自动流转 | 实时 |
+
+## 🚀 快速开始（离线模式，无需任何 Key）
+
+```bash
+# 1. 克隆项目
+git clone <your-repo-url>
+cd project1_store_agent
+
+# 2. 创建虚拟环境并安装依赖
+python -m venv .venv
+.venv\Scripts\activate  # Windows
+# source .venv/bin/activate  # Linux/Mac
+pip install -r requirements.txt
+
+# 3. 生成样例文档并构建索引
+python scripts/gen_docs.py
+python scripts/build_index.py
+
+# 4. 跑单元测试
+pytest tests -q
+
+# 5. 命令行模拟对话
+python scripts/simulate_client.py
+
+# 6. 启动 HTTP 服务
+uvicorn app.main:app --reload --port 8000
+```
+
+访问 http://localhost:8000 查看前端页面，http://localhost:8000/docs 查看 API 文档。
 
 ## 📁 项目结构
 
@@ -425,56 +214,25 @@ project1_store_agent/
 └── README.md
 ```
 
-## 🚀 快速开始（离线模式，无需任何 Key）
-
-```bash
-# 1. 克隆项目
-git clone <your-repo-url>
-cd project1_store_agent
-
-# 2. 创建虚拟环境并安装依赖
-python -m venv .venv
-.venv\Scripts\activate  # Windows
-# source .venv/bin/activate  # Linux/Mac
-pip install -r requirements.txt
-
-# 3. 生成样例文档并构建索引
-python scripts/gen_docs.py
-python scripts/build_index.py
-
-# 4. 跑单元测试
-pytest tests -q
-
-# 5. 命令行模拟对话
-python scripts/simulate_client.py
-
-# 6. 启动 HTTP 服务
-uvicorn app.main:app --reload --port 8000
-```
-
-访问 http://localhost:8000 查看前端页面，http://localhost:8000/docs 查看 API 文档。
-
-## 📊 数据导入（生产环境必备）
+## 🗄️ 主数据管理（5 张表 + CSV 导入 + REST API）
 
 > ⚠️ **以下是运营人员/开发者视角的操作**，用于初始化业务数据。店员/店长日常使用不需要做这些。
 
 系统内置 5 张主数据表，支持 **Excel/CSV 批量导入** + **REST API 管理**，无需对接外部系统即可快速上线。
 
-### 第一步：准备数据
+### 5 张主数据表
+
+| 数据表 | 用途 | 初始化脚本 |
+|---|---|---|
+| `inventory` | 门店物料库存（支持按门店分库存） | `scripts/init_master_data.py` |
+| `promotions` | 促销政策（支持有效期/状态管理） | 同上 |
+| `stores` | 门店主数据（地址/电话/店长/状态） | 同上 |
+| `devices` | 设备清单（品牌/型号/保修/状态） | 同上 |
+| `staff` | 员工信息（角色/电话/所属门店） | 同上 |
+
+### CSV 批量导入
 
 `data/templates/` 目录提供了 5 个 CSV 模板（含示例数据），直接用 Excel 打开编辑即可：
-
-| 模板文件 | 用途 | 必要列 |
-|---|---|---|
-| `stores.csv` | 门店信息 | store_id, name, address, phone, manager, status |
-| `devices.csv` | 设备台账 | device_id, store_id, device_type, brand, model, status |
-| `staff.csv` | 员工信息 | staff_id, name, role, phone, store_id, status |
-| `promotions.csv` | 促销政策 | promo_code, name, rule, status, valid_from, valid_until |
-| `inventory.csv` | 物料库存 | store_id, material, stock, unit, reorder_point |
-
-> 所有导入脚本支持中英文列名自动识别，CSV 用 UTF-8 编码（Excel 另存为 CSV UTF-8）。
-
-### 第二步：批量导入
 
 ```bash
 # 导入门店信息
@@ -493,30 +251,13 @@ python scripts/import_promotions.py data/templates/promotions.csv
 python scripts/sync_inventory.py --import data/templates/inventory.csv
 ```
 
-### 第三步：验证导入结果
-
-```bash
-# 查看已导入的门店
-python scripts/import_stores.py list
-
-# 查看已导入的员工
-python scripts/import_staff.py list
-
-# 查看已导入的促销
-python scripts/import_promotions.py list
-
-# 查看已导入的设备
-python scripts/import_devices.py list
-```
+> 所有导入脚本支持中英文列名自动识别，CSV 用 UTF-8 编码（Excel 另存为 CSV UTF-8）。
 
 ### 库存实时同步
 
 ```bash
 # 模拟 ERP 同步（随机波动，演示用）
 python scripts/sync_inventory.py
-
-# 只同步指定门店
-python scripts/sync_inventory.py --store S001
 
 # 手动设置某物料库存
 python scripts/sync_inventory.py --set S001 可乐杯 500
@@ -537,6 +278,27 @@ python scripts/check_promotions.py
 python scripts/check_promotions.py --dry-run
 ```
 
+### 管理接口（REST API）
+
+所有主数据均提供 CRUD 接口，可对接管理后台：
+
+```
+GET    /api/inventory?store_id=S001    # 库存列表
+POST   /api/inventory                    # 新增/更新库存
+
+GET    /api/promotions                   # 促销列表
+POST   /api/promotions                   # 新增/更新促销
+
+GET    /api/stores                       # 门店列表
+POST   /api/stores                       # 新增/更新门店
+
+GET    /api/devices?store_id=S001       # 设备清单
+POST   /api/devices                      # 新增/更新设备
+
+GET    /api/staff?role=维修工            # 员工列表
+POST   /api/staff                        # 新增/更新员工
+```
+
 ### 定时任务配置（Linux crontab）
 
 ```bash
@@ -546,7 +308,6 @@ crontab -e
 # 粘贴以下内容：
 */10 * * * * cd /opt/project1_store_agent && python scripts/sync_inventory.py >> /var/log/sync_inventory.log 2>&1
 0 2 * * * cd /opt/project1_store_agent && python scripts/check_promotions.py >> /var/log/check_promotions.log 2>&1
-0 3 * * * cd /opt/project1_store_agent && python scripts/import_stores.py data/templates/stores.csv >> /var/log/import_stores.log 2>&1
 ```
 
 ## 🔧 配置说明
@@ -584,89 +345,6 @@ docker compose up -d --build
 ```
 
 启动 7 个容器：etcd + MinIO + Milvus + MySQL + Redis + App + Nginx。
-
-## 📊 性能指标
-
-- **召回率@3**：98.75%（120 条评测集，离线哈希向量模式）
-- **意图准确率**：100%
-- **任务完成率**：100%
-- **幻觉率**：0%
-- **单元测试**：47 passed（33 核心 + 14 主数据管理）
-- **工单状态机**：5 状态流转，不可跳级/回退，关闭需店长确认
-
-## 📝 工单闭环流程
-
-```
-店长报修（对话/表单）
-    ↓
-工单创建（已受理）→ 企微维修群推送
-    ↓
-维修工派单（已派单）→ 企微群推送（含故障描述）
-    ↓
-维修工接单（维修中）
-    ↓
-维修完成（已解决）
-    ↓
-店长确认（已关闭）
-```
-
-维修工可在企微群内回复「RX单号 已派单/维修中/已解决」自动推进状态，或在网页前端操作。
-
-## 🗄️ 主数据管理
-
-系统内置 5 张主数据表，支持动态管理和 ERP 同步：
-
-| 数据表 | 用途 | 初始化脚本 |
-|---|---|---|
-| `inventory` | 门店物料库存（支持按门店分库存） | `scripts/init_master_data.py` |
-| `promotions` | 促销政策（支持有效期/状态管理） | 同上 |
-| `stores` | 门店主数据（地址/电话/店长/状态） | 同上 |
-| `devices` | 设备清单（品牌/型号/保修/状态） | 同上 |
-| `staff` | 员工信息（角色/电话/所属门店） | 同上 |
-
-### 库存实时同步
-
-```bash
-# 初始化主数据（首次部署）
-python scripts/init_master_data.py
-
-# 模拟 ERP 同步（随机波动，演示用）
-python scripts/sync_inventory.py
-
-# 只同步指定门店
-python scripts/sync_inventory.py --store S001
-
-# 手动设置某物料库存
-python scripts/sync_inventory.py --set S001 可乐杯 500
-
-# 库存增减（入库/出库）
-python scripts/sync_inventory.py --delta S001 可乐杯 -100
-```
-
-生产环境将 `sync_inventory.py` 中的模拟逻辑替换为真实 ERP API 调用，配置为定时任务（如每 5 分钟同步一次）即可实现实时库存同步。
-
-### 管理接口（REST API）
-
-所有主数据均提供 CRUD 接口，可对接管理后台：
-
-```
-GET    /api/inventory?store_id=S001    # 库存列表
-GET    /api/inventory/S001/可乐杯        # 单物料查询
-POST   /api/inventory                    # 新增/更新库存
-
-GET    /api/promotions                   # 促销列表
-GET    /api/promotions/P01               # 促销详情
-POST   /api/promotions                   # 新增/更新促销
-
-GET    /api/stores                       # 门店列表
-POST   /api/stores                       # 新增/更新门店
-
-GET    /api/devices?store_id=S001       # 设备清单
-POST   /api/devices                      # 新增/更新设备
-
-GET    /api/staff?role=维修工            # 员工列表
-POST   /api/staff                        # 新增/更新员工
-```
 
 ## 📄 License
 
