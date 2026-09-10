@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>门店运营智能助手</title>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f5f5f5; height:100vh; display:flex; flex-direction:column; }
@@ -21,10 +22,21 @@
   .msg { margin-bottom:14px; display:flex; }
   .msg.user { justify-content:flex-end; }
   .msg.bot { justify-content:flex-start; }
-  .bubble { max-width:75%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6; word-break:break-word; white-space:pre-wrap; }
+  .bubble { max-width:75%; padding:10px 14px; border-radius:12px; font-size:14px; line-height:1.6; word-break:break-word; }
   .msg.user .bubble { background:#4a90d9; color:#fff; border-bottom-right-radius:4px; }
   .msg.bot .bubble { background:#fff; color:#333; border-bottom-left-radius:4px; box-shadow:0 1px 2px rgba(0,0,0,0.1); }
   .msg.bot .bubble.tool { background:#f0f7ff; border-left:3px solid #4a90d9; }
+  .msg.bot .bubble.markdown h1, .msg.bot .bubble.markdown h2, .msg.bot .bubble.markdown h3 { font-size:15px; margin:8px 0 4px; }
+  .msg.bot .bubble.markdown p { margin:4px 0; }
+  .msg.bot .bubble.markdown ul, .msg.bot .bubble.markdown ol { margin:4px 0; padding-left:20px; }
+  .msg.bot .bubble.markdown li { margin:2px 0; }
+  .msg.bot .bubble.markdown strong { color:#1a1a1a; }
+  .msg.bot .bubble.markdown code { background:#f0f0f0; padding:1px 4px; border-radius:3px; font-size:13px; }
+  .msg.bot .bubble.markdown pre { background:#f5f5f5; padding:8px; border-radius:6px; overflow-x:auto; margin:6px 0; }
+  .msg.bot .bubble.markdown pre code { background:none; padding:0; }
+  .msg.bot .bubble .typing-cursor { display:inline-block; width:2px; height:14px; background:#4a90d9; margin-left:2px; animation:blink 0.8s infinite; }
+  @keyframes blink { 0%,50%{opacity:1} 51%,100%{opacity:0} }
+  .status-hint { font-size:11px; color:#999; margin-bottom:8px; padding-left:4px; }
   .quick-actions { padding:8px 16px; background:#fff; border-top:1px solid #eee; display:flex; gap:8px; flex-wrap:wrap; }
   .quick-actions button { padding:6px 12px; background:#f0f0f0; border:1px solid #ddd; border-radius:16px; font-size:12px; cursor:pointer; color:#555; }
   .quick-actions button:hover { background:#e8f0fe; border-color:#4a90d9; color:#4a90d9; }
@@ -107,18 +119,16 @@
   <!-- 对话页 -->
   <div class="page active" id="page-chat">
     <div class="store-bar">
-      <span>门店：<select id="chatStore">
-        <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
-        <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
-      </select></span>
+      <span>门店：<select id="chatStore"></select></span>
       <span id="chatStatus">在线</span>
     </div>
     <div class="chat-area" id="chatArea">
-      <div class="msg bot"><div class="bubble">你好！我是门店运营助手，可以帮你：
-• 设备报修（说"收银机坏了报修"）
-• 库存查询（说"可乐杯还有多少"）
-• 促销查询（说"P01 活动还能用吗"）
-• 运营知识（说"收银机死机怎么办"）</div></div>
+      <div class="msg bot"><div class="bubble markdown">你好！我是门店运营助手，可以帮你：
+
+- **设备报修**（说"收银机坏了报修"）
+- **库存查询**（说"可乐杯还有多少"）
+- **促销查询**（说"P01 活动还能用吗"）
+- **运营知识**（说"收银机死机怎么办"）</div></div>
     </div>
     <div class="quick-actions">
       <button onclick="quickSend('收银机死机了怎么办')">收银机死机</button>
@@ -146,10 +156,7 @@
           <h3>📝 新建报修工单</h3>
           <div class="form-group">
             <label>门店</label>
-            <select id="repairStore">
-              <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
-              <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
-            </select>
+            <select id="repairStore"></select>
           </div>
           <div class="form-group">
             <label>设备名称</label>
@@ -175,8 +182,6 @@
         <div class="filter-bar">
           <select id="filterStore" onchange="loadOrders()">
             <option value="">全部门店</option>
-            <option value="S001">S001</option><option value="S002">S002</option><option value="S003">S003</option>
-            <option value="S008">S008</option><option value="S009">S009</option><option value="S010">S010</option>
           </select>
           <select id="filterStatus" onchange="loadOrders()">
             <option value="">全部状态</option>
@@ -236,8 +241,35 @@
 <script>
 let sessionId = null;
 let expandedOrder = null;
+let isSending = false;
 
-// Tab 切换
+// 配置 marked
+marked.setOptions({ breaks: true, gfm: true });
+
+// ========== 门店动态获取 ==========
+const DEFAULT_STORES = ['S001', 'S002', 'S003', 'S008', 'S009', 'S010'];
+
+async function loadStores() {
+  let stores = DEFAULT_STORES;
+  try {
+    const res = await fetch('/api/stores');
+    const data = await res.json();
+    if (Array.isArray(data) && data.length > 0) {
+      stores = data.map(s => s.store_id || s.id || s).filter(Boolean);
+    }
+  } catch (e) {
+    console.log('门店列表获取失败，使用默认门店');
+  }
+  // 填充3个下拉框
+  ['chatStore', 'repairStore'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = stores.map(s => `<option value="${s}">${s}</option>`).join('');
+  });
+  const filterSel = document.getElementById('filterStore');
+  filterSel.innerHTML = '<option value="">全部门店</option>' + stores.map(s => `<option value="${s}">${s}</option>`).join('');
+}
+
+// ========== Tab 切换 ==========
 function switchTab(tab) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
@@ -255,45 +287,130 @@ function switchSubTab(sub) {
   if (sub === 'list') loadOrders();
 }
 
-// ========== 对话页 ==========
+// ========== 对话页（SSE 流式 + Markdown） ==========
 const chatArea = document.getElementById('chatArea');
 const msgInput = document.getElementById('msgInput');
 const sendBtn = document.getElementById('sendBtn');
 
-function addMsg(text, type, isTool) {
+function escapeHtml(text) {
+  const div = document.createElement('div');
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+function renderMarkdown(text) {
+  try {
+    return marked.parse(text || '');
+  } catch (e) {
+    return escapeHtml(text);
+  }
+}
+
+function addMsg(text, type, isTool, isMarkdown) {
   const div = document.createElement('div');
   div.className = 'msg ' + type;
   const bubble = document.createElement('div');
-  bubble.className = 'bubble' + (isTool ? ' tool' : '');
-  bubble.textContent = text;
+  bubble.className = 'bubble' + (isTool ? ' tool' : '') + (isMarkdown ? ' markdown' : '');
+  if (isMarkdown) {
+    bubble.innerHTML = renderMarkdown(text);
+  } else {
+    bubble.textContent = text;
+  }
   div.appendChild(bubble);
   chatArea.appendChild(div);
   chatArea.scrollTop = chatArea.scrollHeight;
+  return bubble;
 }
 
-function addLoading() {
+function addStatusHint(text) {
   const div = document.createElement('div');
-  div.className = 'msg bot';
-  div.id = 'loadingMsg';
-  div.innerHTML = '<div class="bubble"><span class="loading"></span></div>';
+  div.className = 'status-hint';
+  div.id = 'statusHint';
+  div.textContent = text;
   chatArea.appendChild(div);
   chatArea.scrollTop = chatArea.scrollHeight;
 }
 
-function removeLoading() {
-  const el = document.getElementById('loadingMsg');
+function updateStatusHint(text) {
+  const el = document.getElementById('statusHint');
+  if (el) el.textContent = text;
+}
+
+function removeStatusHint() {
+  const el = document.getElementById('statusHint');
   if (el) el.remove();
 }
 
+function addStreamingBubble() {
+  const div = document.createElement('div');
+  div.className = 'msg bot';
+  const bubble = document.createElement('div');
+  bubble.className = 'bubble markdown';
+  bubble.id = 'streamingBubble';
+  bubble.innerHTML = '<span class="typing-cursor"></span>';
+  div.appendChild(bubble);
+  chatArea.appendChild(div);
+  chatArea.scrollTop = chatArea.scrollHeight;
+  return bubble;
+}
+
+function updateStreamingBubble(text) {
+  const bubble = document.getElementById('streamingBubble');
+  if (bubble) {
+    bubble.innerHTML = renderMarkdown(text) + '<span class="typing-cursor"></span>';
+    chatArea.scrollTop = chatArea.scrollHeight;
+  }
+}
+
+function finishStreamingBubble(text) {
+  const bubble = document.getElementById('streamingBubble');
+  if (bubble) {
+    bubble.innerHTML = renderMarkdown(text);
+    bubble.id = '';
+  }
+}
+
+// SSE 事件解析
+function parseSSE(buffer) {
+  const events = [];
+  const parts = buffer.split('\n\n');
+  for (let i = 0; i < parts.length - 1; i++) {
+    const part = parts[i];
+    let event = 'message';
+    let data = '';
+    part.split('\n').forEach(line => {
+      if (line.startsWith('event: ')) {
+        event = line.slice(7).trim();
+      } else if (line.startsWith('data: ')) {
+        data += line.slice(6);
+      }
+    });
+    if (data) {
+      try {
+        events.push({ event, data: JSON.parse(data) });
+      } catch (e) {
+        events.push({ event, data: data });
+      }
+    }
+  }
+  return { events, remaining: parts[parts.length - 1] };
+}
+
 async function sendMsg() {
+  if (isSending) return;
   const text = msgInput.value.trim();
   if (!text) return;
+  isSending = true;
   msgInput.value = '';
   sendBtn.disabled = true;
-  addMsg(text, 'user');
-  addLoading();
+  addMsg(text, 'user', false, false);
+  addStatusHint('正在识别意图...');
+
+  let fullAnswer = '';
+  let toolResultsShown = false;
+
   try {
-    const res = await fetch('/api/chat', {
+    const res = await fetch('/api/chat/stream', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({
@@ -303,25 +420,83 @@ async function sendMsg() {
         session_id: sessionId
       })
     });
-    const data = await res.json();
-    removeLoading();
-    sessionId = data.session_id;
-    if (data.tool_results && data.tool_results.length > 0) {
-      data.tool_results.forEach(t => {
-        if (t.name === 'report_repair' && t.output) {
-          addMsg(`🔧 工单已创建：${t.output.order_no}\n设备：${t.output.device}\n状态：${t.output.status}\n响应：${t.output.sla}`, 'bot', true);
-        } else if (t.name === 'query_inventory' && t.output) {
-          addMsg(`📦 ${t.output.material || '库存'}：${t.output.stock}${t.output.unit || ''}\n${t.output.suggestion || ''}`, 'bot', true);
-        } else if (t.name === 'check_promotion' && t.output) {
-          addMsg(`🎁 ${t.output.policy_name || ''}（${t.output.policy_code || ''}）\n${t.output.rule || ''}\n状态：${t.output.status || ''}`, 'bot', true);
+
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let streamingBubble = null;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const { events, remaining } = parseSSE(buffer);
+      buffer = remaining;
+
+      for (const { event, data } of events) {
+        if (event === 'intent') {
+          const intentMap = {
+            'repair_tool': '识别为：设备报修',
+            'inventory_query': '识别为：库存查询',
+            'promotion_check': '识别为：促销校验',
+            'knowledge_query': '识别为：知识问答',
+            'handoff': '识别为：转人工',
+            'chat': '识别为：日常对话'
+          };
+          updateStatusHint(intentMap[data.intent] || ('识别为：' + (data.intent || '未知')));
         }
-      });
+        else if (event === 'retrieval') {
+          updateStatusHint('正在检索知识库...');
+        }
+        else if (event === 'tool') {
+          updateStatusHint('正在执行工具调用...');
+          if (data.results && data.results.length > 0 && !toolResultsShown) {
+            toolResultsShown = true;
+            data.results.forEach(t => {
+              if (t.name === 'report_repair' && t.output) {
+                addMsg(`🔧 **工单已创建**\n- 工单号：${t.output.order_no}\n- 设备：${t.output.device}\n- 状态：${t.output.status}\n- 响应：${t.output.sla}`, 'bot', true, true);
+              } else if (t.name === 'query_inventory' && t.output) {
+                addMsg(`📦 **库存查询**\n- 物料：${t.output.material || '未知'}\n- 库存：${t.output.stock}${t.output.unit || ''}\n- ${t.output.suggestion || ''}`, 'bot', true, true);
+              } else if (t.name === 'check_promotion' && t.output) {
+                addMsg(`🎁 **促销信息**\n- 活动：${t.output.policy_name || ''}（${t.output.policy_code || ''}）\n- 规则：${t.output.rule || ''}\n- 状态：${t.output.status || ''}`, 'bot', true, true);
+              }
+            });
+          }
+        }
+        else if (event === 'answer_start') {
+          removeStatusHint();
+          streamingBubble = addStreamingBubble();
+        }
+        else if (event === 'answer_delta') {
+          fullAnswer += (typeof data === 'string' ? data : (data.delta || data.text || data.content || ''));
+          updateStreamingBubble(fullAnswer);
+        }
+        else if (event === 'done') {
+          sessionId = data.session_id;
+          if (streamingBubble) {
+            finishStreamingBubble(data.final_answer || fullAnswer);
+          } else if (fullAnswer) {
+            addMsg(fullAnswer, 'bot', false, true);
+          }
+        }
+      }
     }
-    addMsg(data.answer, 'bot');
+
+    // 如果流结束但没有 done 事件，用已收集的内容
+    if (!streamingBubble && fullAnswer) {
+      removeStatusHint();
+      addMsg(fullAnswer, 'bot', false, true);
+    } else if (streamingBubble) {
+      finishStreamingBubble(fullAnswer);
+    }
+
   } catch (e) {
-    removeLoading();
-    addMsg('请求失败：' + e.message, 'bot');
+    removeStatusHint();
+    addMsg('请求失败：' + e.message + '\n\n（可尝试切换为非流式模式，或检查服务是否正常运行）', 'bot', false, true);
   }
+
+  isSending = false;
   sendBtn.disabled = false;
   msgInput.focus();
 }
@@ -383,20 +558,20 @@ async function loadOrders() {
     listEl.innerHTML = orders.map(o => `
       <div class="order-item" onclick="toggleOrder('${o.order_no}', this)">
         <div class="order-header">
-          <span class="order-no">${o.order_no}</span>
-          <span class="status-tag status-${o.status}">${o.status}</span>
+          <span class="order-no">${escapeHtml(o.order_no)}</span>
+          <span class="status-tag status-${o.status}">${escapeHtml(o.status)}</span>
         </div>
         <div class="order-info">
-          <span>🏪 ${o.store_id}</span>
-          <span>🔧 ${o.device || '-'}</span>
-          <span>⏰ ${o.created_at || '-'}</span>
-          ${o.actor ? `<span>👤 ${o.actor}</span>` : ''}
+          <span>🏪 ${escapeHtml(o.store_id)}</span>
+          <span>🔧 ${escapeHtml(o.device || '-')}</span>
+          <span>⏰ ${escapeHtml(o.created_at || '-')}</span>
+          ${o.actor ? `<span>👤 ${escapeHtml(o.actor)}</span>` : ''}
         </div>
-        <div class="order-info" style="color:#aaa;margin-top:2px;">${o.problem_desc || ''}</div>
+        <div class="order-info" style="color:#aaa;margin-top:2px;">${escapeHtml(o.problem_desc || '')}</div>
       </div>
     `).join('');
   } catch (e) {
-    listEl.innerHTML = '<div class="empty">加载失败：' + e.message + '</div>';
+    listEl.innerHTML = '<div class="empty">加载失败：' + escapeHtml(e.message) + '</div>';
   }
 }
 
@@ -418,13 +593,13 @@ async function toggleOrder(orderNo, itemEl) {
     if (o.status === '维修中') actions += `<button class="primary" onclick="updateStatus('${o.order_no}','已解决')">✅ 标记已解决</button>`;
     if (o.status === '已解决') actions += `<button onclick="updateStatus('${o.order_no}','已关闭',true)">📦 关闭工单（需店长确认）</button>`;
     detail.innerHTML = `
-      <p><strong>工单号：</strong>${o.order_no}</p>
-      <p><strong>门店：</strong>${o.store_id} | <strong>设备：</strong>${o.device || '-'}</p>
-      <p><strong>故障描述：</strong>${o.problem_desc || '-'}</p>
-      <p><strong>优先级：</strong>${o.priority || '-'} | <strong>SLA：</strong>${o.sla || '-'}</p>
-      <p><strong>当前状态：</strong><span class="status-tag status-${o.status}">${o.status}</span></p>
-      <p><strong>创建时间：</strong>${o.created_at || '-'}</p>
-      ${o.actor ? `<p><strong>处理人：</strong>${o.actor}</p>` : '<p><strong>处理人：</strong>未分配</p>'}
+      <p><strong>工单号：</strong>${escapeHtml(o.order_no)}</p>
+      <p><strong>门店：</strong>${escapeHtml(o.store_id)} | <strong>设备：</strong>${escapeHtml(o.device || '-')}</p>
+      <p><strong>故障描述：</strong>${escapeHtml(o.problem_desc || '-')}</p>
+      <p><strong>优先级：</strong>${escapeHtml(o.priority || '-')} | <strong>SLA：</strong>${escapeHtml(o.sla || '-')}</p>
+      <p><strong>当前状态：</strong><span class="status-tag status-${o.status}">${escapeHtml(o.status)}</span></p>
+      <p><strong>创建时间：</strong>${escapeHtml(o.created_at || '-')}</p>
+      ${o.actor ? `<p><strong>处理人：</strong>${escapeHtml(o.actor)}</p>` : '<p><strong>处理人：</strong>未分配</p>'}
       ${o.confirmed ? `<p><strong>店长确认：</strong>已确认</p>` : ''}
       <div class="actions">${actions}</div>
     `;
@@ -500,8 +675,17 @@ async function loadMetrics() {
   }
 }
 
-// 页面加载时检查健康
+// 页面加载时初始化
+loadStores();
 loadHealth();
+
+// 告警页每30秒自动刷新
+setInterval(() => {
+  if (document.getElementById('page-alert').classList.contains('active')) {
+    loadHealth();
+    loadMetrics();
+  }
+}, 30000);
 </script>
 </body>
 </html>
